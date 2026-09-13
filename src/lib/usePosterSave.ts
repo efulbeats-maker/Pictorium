@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback } from "react"
-import type { SearchResult, TMDBImage, Mapping } from "./types"
+import type { SearchResult, TMDBImage, Mapping, PosterShape } from "./types"
 import { titleOf } from "./utils"
 import { computeTopBadge, type BadgeInput } from "./poster-badge"
 import { defaultGradientHeightForPoster } from "./gradient-defaults"
@@ -70,6 +70,11 @@ interface PosterSaveDeps {
   autoRotateClean: boolean
   defaultAutoRotateClean: boolean
   excludedPosters: string[]
+  rotationBackdrops: string[]
+  autoRotateBackdrop: boolean
+  defaultAutoRotateBackdrop: boolean
+  excludedBackdrops: string[]
+  backdrops: TMDBImage[]
   accentColor: string | null
   logoDisabled: boolean
   setLogoDisabled: (v: boolean) => void
@@ -79,11 +84,15 @@ interface PosterSaveDeps {
   networkLogo: boolean
   lang: string
   episodeGroupId?: string | null
+  /** Formato canvas in editing (congelato per-titolo al save). */
+  posterShape: PosterShape
 }
 
 export interface SaveConfigOverrides {
   excludedPosters?: string[]
   rotationPosters?: string[]
+  excludedBackdrops?: string[]
+  rotationBackdrops?: string[]
   previewPoster?: TMDBImage
   silent?: boolean
 }
@@ -103,7 +112,8 @@ export function usePosterSave(deps: PosterSaveDeps) {
     genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
     networkLogoOffsetX, networkLogoOffsetY,
     rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, logoDisabled, setLogoDisabled,
-    setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId,
+    rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops,
+    setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId, posterShape,
   } = deps
 
   const selectPoster = useCallback(async (image: TMDBImage) => {
@@ -240,6 +250,48 @@ export function usePosterSave(deps: PosterSaveDeps) {
       if (!networkLogoPath && candidates.length) { networkLogoName = candidates[0].name }
     }
     const effectiveLogoPath = isClean && !logoDisabled ? (selectedLogo?.file_path || null) : null
+    // Dual-format My Posters: gli slider mostrano il profilo del formato in
+    // editing, quindi il save scrive il profilo attivo e PRESERVA l'altro dal
+    // mapping esistente (mai azzerato dal save dell'altro formato). Per i
+    // mapping nuovi il profilo verticale eredita gli slider (portrait subito
+    // funzionante). Lo sfondo è editabile solo in landscape: in portrait si
+    // preserva quello salvato, altrimenti ogni save verticale cancellerebbe
+    // il 16:9 (oggi removeBackdrop + save portrait = backdrop perso).
+    const prevMapping = mappingsMap.get(`${selected.media_type}:${selected.id}`) ?? null
+    const isLandscapeMode = posterShape === "landscape"
+    const keepFlat = <T>(current: T, saved: T | null | undefined): T =>
+      isLandscapeMode ? (prevMapping ? (saved ?? current) : current) : current
+    const landscapeProfile = isLandscapeMode
+      ? {
+          logoScale, logoOffsetX, logoOffsetY,
+          topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
+          genreBadgeScale, genreBadgeOffsetX, genreBadgeOffsetY,
+          qualityBadgeScale, qualityBadgeOffsetX, qualityBadgeOffsetY,
+          networkLogoScale, networkLogoOffsetX, networkLogoOffsetY,
+          gradientHeight, blurEnabled, blurIntensity, blurFade, blurDarkness,
+        }
+      : (prevMapping?.landscape ?? null)
+    const backdropToSave = isLandscapeMode
+      ? (selectedBackdrop?.file_path || null)
+      : (selectedBackdrop?.file_path ?? prevMapping?.backdropPath ?? null)
+    const backdropScaleToSave = isLandscapeMode ? backdropScale : (prevMapping?.backdropScale ?? backdropScale)
+    const backdropOffsetXToSave = isLandscapeMode ? backdropOffsetX : (prevMapping?.backdropOffsetX ?? backdropOffsetX)
+    const backdropOffsetYToSave = isLandscapeMode ? backdropOffsetY : (prevMapping?.backdropOffsetY ?? backdropOffsetY)
+    // Rotazione sfondi landscape (mirror verticale): in portrait si preserva
+    // quella salvata, altrimenti ogni save verticale cancellerebbe la
+    // rotazione 16:9. Per i mapping nuovi in landscape con auto-rotate ON,
+    // la lista parte da tutti gli sfondi disponibili.
+    const nextExcludedBackdrops = overrides.excludedBackdrops ?? excludedBackdrops
+    const nextRotationBackdrops = overrides.rotationBackdrops ?? rotationBackdrops
+    const excludedBackdropSet = new Set(nextExcludedBackdrops)
+    const baseRotationBackdrops = isLandscapeMode
+      ? (nextRotationBackdrops.length > 0
+        ? nextRotationBackdrops
+        : defaultAutoRotateBackdrop && isNewMapping
+          ? backdrops.map((b) => b.file_path)
+          : [])
+      : (prevMapping?.cleanBackdrops ?? [])
+    const effectiveRotationBackdrops = baseRotationBackdrops.filter((path) => !excludedBackdropSet.has(path))
     try {
       await http("/api/mappings", {
         method: "POST",
@@ -252,9 +304,13 @@ export function usePosterSave(deps: PosterSaveDeps) {
           logoPath: effectiveLogoPath,
           originalPosterPath: selected.poster_path,
           language: posterToSave.iso_639_1,
-          logoScale, logoOffsetX, logoOffsetY,
-          backdropPath: selectedBackdrop?.file_path || null,
-          backdropScale, backdropOffsetX, backdropOffsetY,
+          logoScale: keepFlat(logoScale, prevMapping?.logoScale),
+          logoOffsetX: keepFlat(logoOffsetX, prevMapping?.logoOffsetX),
+          logoOffsetY: keepFlat(logoOffsetY, prevMapping?.logoOffsetY),
+          backdropPath: backdropToSave,
+          backdropScale: backdropScaleToSave,
+          backdropOffsetX: backdropOffsetXToSave,
+          backdropOffsetY: backdropOffsetYToSave,
           genreName: metaInfo.genres[0]?.name || null,
           voteAverage: metaInfo.voteAverage || null,
           // IMDb ID per provider custom rating: evita getExternalIds sui salvati.
@@ -286,33 +342,40 @@ export function usePosterSave(deps: PosterSaveDeps) {
           rankingBadgeStyle,
           defaultBadgeStyle,
           defaultRankingBadgeStyle,
-          blurEnabled,
-          blurIntensity,
-          blurFade,
-          blurDarkness,
-          gradientHeight,
-          topBadgeScale,
-          topBadgeOffsetX,
-          topBadgeOffsetY,
-          genreBadgeScale,
-          qualityBadgeScale,
-          networkLogoScale,
-          genreBadgeOffsetX,
-          genreBadgeOffsetY,
-          qualityBadgeOffsetX,
-          qualityBadgeOffsetY,
-          networkLogoOffsetX,
-          networkLogoOffsetY,
+          blurEnabled: keepFlat(blurEnabled, prevMapping?.blurEnabled),
+          blurIntensity: keepFlat(blurIntensity, prevMapping?.blurIntensity),
+          blurFade: keepFlat(blurFade, prevMapping?.blurFade),
+          blurDarkness: keepFlat(blurDarkness, prevMapping?.blurDarkness),
+          gradientHeight: keepFlat(gradientHeight, prevMapping?.gradientHeight),
+          topBadgeScale: keepFlat(topBadgeScale, prevMapping?.topBadgeScale),
+          topBadgeOffsetX: keepFlat(topBadgeOffsetX, prevMapping?.topBadgeOffsetX),
+          topBadgeOffsetY: keepFlat(topBadgeOffsetY, prevMapping?.topBadgeOffsetY),
+          genreBadgeScale: keepFlat(genreBadgeScale, prevMapping?.genreBadgeScale),
+          qualityBadgeScale: keepFlat(qualityBadgeScale, prevMapping?.qualityBadgeScale),
+          networkLogoScale: keepFlat(networkLogoScale, prevMapping?.networkLogoScale),
+          genreBadgeOffsetX: keepFlat(genreBadgeOffsetX, prevMapping?.genreBadgeOffsetX),
+          genreBadgeOffsetY: keepFlat(genreBadgeOffsetY, prevMapping?.genreBadgeOffsetY),
+          qualityBadgeOffsetX: keepFlat(qualityBadgeOffsetX, prevMapping?.qualityBadgeOffsetX),
+          qualityBadgeOffsetY: keepFlat(qualityBadgeOffsetY, prevMapping?.qualityBadgeOffsetY),
+          networkLogoOffsetX: keepFlat(networkLogoOffsetX, prevMapping?.networkLogoOffsetX),
+          networkLogoOffsetY: keepFlat(networkLogoOffsetY, prevMapping?.networkLogoOffsetY),
           cleanPosters: effectiveRotationPosters.length > 0 ? effectiveRotationPosters : undefined,
           cleanPosterIndex: 0,
           cleanPosterUpdatedAt: new Date().toISOString(),
           autoRotateClean: effectiveRotationPosters.length > 1 ? (defaultAutoRotateClean && isClean && isNewMapping ? true : autoRotateClean) : undefined,
           excludedPosters: nextExcludedPosters.length > 0 ? nextExcludedPosters : undefined,
+          cleanBackdrops: effectiveRotationBackdrops.length > 0 ? effectiveRotationBackdrops : undefined,
+          cleanBackdropIndex: isLandscapeMode ? 0 : (prevMapping?.cleanBackdropIndex ?? undefined),
+          cleanBackdropUpdatedAt: isLandscapeMode ? new Date().toISOString() : (prevMapping?.cleanBackdropUpdatedAt ?? undefined),
+          autoRotateBackdrop: effectiveRotationBackdrops.length > 1 ? (isLandscapeMode && defaultAutoRotateBackdrop && isNewMapping ? true : autoRotateBackdrop) : undefined,
+          excludedBackdrops: nextExcludedBackdrops.length > 0 ? nextExcludedBackdrops : undefined,
           logoDisabled: logoDisabled || undefined,
           networkLogo: networkLogo !== undefined ? networkLogo : undefined,
           networkLogoPath: networkLogoPath ?? null,
           networkLogoName: networkLogoName ?? null,
           episodeGroupId: episodeGroupId || undefined,
+          posterShape,
+          landscape: landscapeProfile,
         }),
       })
       setPreviewId(`${selected.media_type}:${selected.id}`)
@@ -322,7 +385,7 @@ export function usePosterSave(deps: PosterSaveDeps) {
       if (!overrides.silent) import("sonner").then(({ toast }) => toast(t("ui.saveError")))
       if (overrides.silent) throw error
     }
-  }, [selected, previewPoster, selectedLogo, metaInfo, logoScale, logoOffsetX, logoOffsetY, trendRank, globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, mdblistAnimeList, loadMappings, customBadge, badgeStyle, rankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, gradientHeight, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, defaultBadgeStyle, defaultRankingBadgeStyle, posters, mappingsMap, accentColor, backdropOffsetX, backdropOffsetY, backdropScale, selectedBackdrop, networkLogo, episodeGroupId]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally complete to save all poster state
+  }, [selected, previewPoster, selectedLogo, metaInfo, logoScale, logoOffsetX, logoOffsetY, trendRank, globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, mdblistAnimeList, loadMappings, customBadge, badgeStyle, rankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, gradientHeight, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops, defaultBadgeStyle, defaultRankingBadgeStyle, posters, mappingsMap, accentColor, backdropOffsetX, backdropOffsetY, backdropScale, selectedBackdrop, networkLogo, episodeGroupId, posterShape]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally complete to save all poster state
 
   return { selectPoster, selectLogo, removeLogo, selectBackdrop, removeBackdrop, saveConfig }
 }

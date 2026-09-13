@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback, useRef } from "react"
 import type { BadgeStyle, RankingBadgeStyle } from "./badge-styles"
+import type { PosterShape } from "./types"
+import { isPosterShape } from "./types"
 import { normalizeRegion } from "./regions"
 import { shouldSkipServerSync } from "./guest-guard"
 import { t } from "./i18n"
@@ -43,10 +45,18 @@ export interface DefaultsState {
   defaultCustomRatingApiKeyHeader?: string
   defaultRatingSources: string[]
   defaultAutoRotateClean: boolean
-  defaultLogoFitEnabled: boolean
+  /** Rotazione 24h di default per formato (sdoppiata). */
+  defaultAutoRotateBackdrop: boolean
+  /** Best-fit automatico per formato (sdoppiato da defaultLogoFitEnabled). */
+  defaultPortraitFitEnabled: boolean
+  defaultLandscapeFitEnabled: boolean
   defaultNetworkLogo: boolean
   defaultPreRelease: boolean
   defaultRibbonSide: RibbonSide
+  /** Formato canvas di default (portrait = verticale standard). */
+  defaultPosterShape: PosterShape
+  /** Allineamento blocco logo/metadati di default (null = default di formato). */
+  defaultLogoAlign: "left" | "center" | null
   defaultEpisodeMetadataSource: "tmdb" | "tvdb"
   /** Regione classifiche (codice JW canonico, es. "IT"). */
   defaultRegion: string
@@ -64,6 +74,10 @@ export interface DefaultsState {
   networkLogo: boolean
   preRelease: boolean
   ribbonSide: RibbonSide
+  /** Allineamento blocco logo/metadati del poster in editing. */
+  logoAlign: "left" | "center"
+  /** Formato canvas del poster in editing (default: defaultPosterShape). */
+  posterShape: PosterShape
   episodeMetadataSource: "tmdb" | "tvdb"
   gradientHeight: number
   topBadgeScale: number
@@ -115,10 +129,14 @@ const DEFAULTS: DefaultsState = {
   defaultCustomRatings: true,
   defaultRatingSources: ["imdb", "tmdb"],
   defaultAutoRotateClean: false,
-  defaultLogoFitEnabled: true,
+  defaultAutoRotateBackdrop: false,
+  defaultPortraitFitEnabled: true,
+  defaultLandscapeFitEnabled: true,
   defaultNetworkLogo: true,
   defaultPreRelease: false,
   defaultRibbonSide: "left",
+  defaultPosterShape: "poster",
+  defaultLogoAlign: null,
   defaultEpisodeMetadataSource: "tmdb",
   defaultRegion: "IT",
   region: "IT",
@@ -133,6 +151,8 @@ const DEFAULTS: DefaultsState = {
   networkLogo: true,
   preRelease: false,
   ribbonSide: "left",
+  posterShape: "poster",
+  logoAlign: "center",
   episodeMetadataSource: "tmdb",
   gradientHeight: 30,
   topBadgeScale: 100,
@@ -216,12 +236,21 @@ interface StoredDefaults {
   defaultRatingSources?: string[]
   ratingSources?: string[]
   defaultAutoRotateClean?: boolean
+  defaultAutoRotateBackdrop?: boolean
+  defaultPortraitFitEnabled?: boolean
+  defaultLandscapeFitEnabled?: boolean
+  /** Deprecato (migrazione): il flag unico alimenta entrambi i formati. */
   defaultLogoFitEnabled?: boolean
   defaultNetworkLogo?: boolean
   defaultPreRelease?: boolean
   preRelease?: boolean
   defaultRibbonSide?: RibbonSide
   ribbonSide?: RibbonSide
+  defaultPosterShape?: PosterShape
+  posterShape?: PosterShape
+  /** null/assente = default di formato (mai spazzatura dallo storage). */
+  defaultLogoAlign?: "left" | "center" | null
+  logoAlign?: "left" | "center"
   defaultEpisodeMetadataSource?: "tmdb" | "tvdb"
   episodeMetadataSource?: "tmdb" | "tvdb"
   defaultRegion?: string
@@ -247,6 +276,13 @@ function safeSetItem(key: string, val: string) {
 
 function buildFromStored(d: StoredDefaults | null): DefaultsState {
   if (!d) return { ...DEFAULTS }
+  // Lo storage è JSON non validato: solo shape noti, mai spazzatura.
+  const storedDefaultShape = isPosterShape(d.defaultPosterShape)
+    ? d.defaultPosterShape
+    : (isPosterShape(d.posterShape) ? d.posterShape : undefined)
+  const storedShape = isPosterShape(d.posterShape)
+    ? d.posterShape
+    : (isPosterShape(d.defaultPosterShape) ? d.defaultPosterShape : undefined)
   return {
     defaultBadgeStyle: d.defaultBadgeStyle ?? d.badgeStyle ?? "shadow",
     defaultRankingBadgeStyle: d.defaultRankingBadgeStyle ?? d.rankingBadgeStyle ?? "default",
@@ -278,10 +314,15 @@ function buildFromStored(d: StoredDefaults | null): DefaultsState {
     defaultCustomRatingApiKeyHeader: d.defaultCustomRatingApiKeyHeader ?? d.customRatingApiKeyHeader,
     defaultRatingSources: d.defaultRatingSources ?? d.ratingSources ?? ["imdb", "tmdb"],
     defaultAutoRotateClean: d.defaultAutoRotateClean ?? d.autoRotateClean ?? false,
-    defaultLogoFitEnabled: d.defaultLogoFitEnabled ?? true,
+    defaultAutoRotateBackdrop: d.defaultAutoRotateBackdrop ?? false,
+    // Migrazione: il vecchio flag unico alimenta entrambi i formati.
+    defaultPortraitFitEnabled: d.defaultPortraitFitEnabled ?? d.defaultLogoFitEnabled ?? true,
+    defaultLandscapeFitEnabled: d.defaultLandscapeFitEnabled ?? d.defaultLogoFitEnabled ?? true,
     defaultNetworkLogo: d.defaultNetworkLogo ?? d.networkLogo ?? true,
     defaultPreRelease: d.defaultPreRelease ?? d.preRelease ?? false,
     defaultRibbonSide: d.defaultRibbonSide ?? d.ribbonSide ?? "left",
+    defaultPosterShape: storedDefaultShape ?? "poster",
+    defaultLogoAlign: d.defaultLogoAlign === "left" || d.defaultLogoAlign === "center" ? d.defaultLogoAlign : null,
     defaultEpisodeMetadataSource: d.defaultEpisodeMetadataSource ?? d.episodeMetadataSource ?? "tmdb",
     defaultRegion: normalizeRegion(d.defaultRegion ?? d.region),
     region: normalizeRegion(d.region ?? d.defaultRegion),
@@ -296,6 +337,10 @@ function buildFromStored(d: StoredDefaults | null): DefaultsState {
     networkLogo: d.networkLogo ?? d.defaultNetworkLogo ?? true,
     preRelease: d.preRelease ?? d.defaultPreRelease ?? false,
     ribbonSide: d.ribbonSide ?? d.defaultRibbonSide ?? "left",
+    posterShape: storedShape ?? "poster",
+    logoAlign: d.logoAlign === "left" || d.logoAlign === "center"
+      ? d.logoAlign
+      : (storedShape === "landscape" ? "left" : "center"),
     episodeMetadataSource: d.episodeMetadataSource ?? d.defaultEpisodeMetadataSource ?? "tmdb",
     gradientHeight: d.gradientHeight ?? d.defaultGradientHeight ?? 30,
     topBadgeScale: d.topBadgeScale ?? d.defaultTopBadgeScale ?? 100,
@@ -357,10 +402,14 @@ function defaultsToPayload(d: DefaultsState): Record<string, unknown> {
     customRatingApiKeyHeader: d.defaultCustomRatingApiKeyHeader ?? "",
     ratingSources: d.defaultRatingSources,
     autoRotateClean: d.defaultAutoRotateClean,
-    defaultLogoFitEnabled: d.defaultLogoFitEnabled,
+    defaultAutoRotateBackdrop: d.defaultAutoRotateBackdrop,
+    defaultPortraitFitEnabled: d.defaultPortraitFitEnabled,
+    defaultLandscapeFitEnabled: d.defaultLandscapeFitEnabled,
     networkLogo: d.defaultNetworkLogo,
     preRelease: d.defaultPreRelease,
     ribbonSide: d.defaultRibbonSide,
+    posterShape: d.defaultPosterShape,
+    logoAlign: d.defaultLogoAlign,
     episodeMetadataSource: d.defaultEpisodeMetadataSource,
     region: d.defaultRegion,
   }

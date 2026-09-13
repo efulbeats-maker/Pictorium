@@ -56,6 +56,12 @@ describe("buildStremioPosterSearchParams", () => {
     expect(buildStremioPosterSearchParams({ customRatings: false }).get("cr")).toBe("0")
   })
 
+  it("emits shape=landscape only when landscape (portrait stays omitted)", () => {
+    expect(buildStremioPosterSearchParams({}).has("shape")).toBe(false)
+    expect(buildStremioPosterSearchParams({ posterShape: "poster" }).has("shape")).toBe(false)
+    expect(buildStremioPosterSearchParams({ posterShape: "landscape" }).get("shape")).toBe("landscape")
+  })
+
   it("serializes ribbonSide left and right explicitly", () => {
     const leftParams = buildStremioPosterSearchParams({ ribbonSide: "left" })
     expect(leftParams.get("side")).toBe("left")

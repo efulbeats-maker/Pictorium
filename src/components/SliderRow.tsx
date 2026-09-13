@@ -1,5 +1,7 @@
 "use client"
 
+import { RotateCcw } from "lucide-react"
+
 export function SliderRow({ icon, label, value, min, max, boundsMin, boundsMax, onChange, onDoubleClick, editingValue, editText, setEditingValue, setEditText, editingKey, suffix }: {
   icon?: React.ReactNode; label: string; value: number; min: number; max: number; boundsMin: number; boundsMax: number;
   onChange: (v: number) => void; onDoubleClick: () => void;
@@ -24,8 +26,8 @@ export function SliderRow({ icon, label, value, min, max, boundsMin, boundsMax, 
         aria-label={`Reset ${label}`}
         title={`Reset ${label}`}
         onClick={onDoubleClick}
-        className="w-4 h-4 shrink-0 flex items-center justify-center text-[10px] text-zinc-600 hover:text-accent transition-colors"
-      >↺</button>
+        className="w-7 h-7 shrink-0 flex items-center justify-center text-zinc-600 hover:text-accent active:scale-90 transition-all"
+      ><RotateCcw className="w-3.5 h-3.5" /></button>
     </div>
   )
 }

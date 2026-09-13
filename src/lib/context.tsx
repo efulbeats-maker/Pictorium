@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from "react"
 import type { SearchResult, TMDBImage, Mapping, CustomCatalogConfig } from "./types"
+import { effectiveMappingForShape } from "./types"
 import { posterUrl, titleOf, yearOf, STREAMING_PLATFORMS } from "./utils"
 import { matchTMDBStudios } from "./awards"
 import { setLang as setI18nLang, createT } from "./i18n"
@@ -20,6 +21,7 @@ import { usePosterEditor, PosterEditorProvider } from "./contexts/PosterEditorCo
 import { usePosterSave } from "./usePosterSave"
 import { defaultGradientHeightForPoster } from "./gradient-defaults"
 import { computeLogoOffsetBounds } from "./logo-layout"
+import { LAND_W, LAND_H } from "./constants"
 import { useOutsideDismiss } from "./useOutsideDismiss"
 import { calculateAverageRating, type AggregatedRatings } from "./ratings"
 import { SearchProvider } from "./contexts/SearchContext"
@@ -31,6 +33,35 @@ import { useCustomCatalogs } from "./useCustomCatalogs"
 import { migrateLegacyStorage } from "./storage-migration"
 
 export type ViewType = "search" | "myposters" | "edit" | "cataloghi"
+
+export interface ImageLists {
+  posters: TMDBImage[]
+  logos: TMDBImage[]
+  backdrops: TMDBImage[]
+}
+
+/**
+ * Fonde due risposte /images TMDB (default + allargata alla lingua originale),
+ * deduplicando per file_path. La prima lista vince a parità di path.
+ */
+export function mergeImageLists(base: ImageLists, extra: ImageLists): ImageLists {
+  const merge = (a: TMDBImage[], b: TMDBImage[]): TMDBImage[] => {
+    const seen = new Set(a.map((img) => img.file_path))
+    const out = [...a]
+    for (const img of b) {
+      if (!seen.has(img.file_path)) {
+        seen.add(img.file_path)
+        out.push(img)
+      }
+    }
+    return out
+  }
+  return {
+    posters: merge(base.posters || [], extra.posters || []),
+    logos: merge(base.logos || [], extra.logos || []),
+    backdrops: merge(base.backdrops || [], extra.backdrops || []),
+  }
+}
 
 export interface MetaInfo {
   genres: { id: number; name: string }[]
@@ -152,6 +183,9 @@ export interface PictoriumCtx {
   setAccentColor: (v: string | null) => void
   topEdgeColor: string | null
   autoSaveExcludedPosters: (nextExcluded: string[], nextRotationPosters?: string[], nextPreviewPoster?: TMDBImage) => Promise<void>
+  autoSaveExcludedBackdrops: (nextExcluded: string[], nextRotationBackdrops?: string[]) => Promise<void>
+  /** Scalda le cache details/images per un titolo (hover risultati). */
+  prefetchTitle: (item: SearchResult) => void
   theme: "dark" | "light"
   setTheme: React.Dispatch<React.SetStateAction<"dark" | "light">>
   uiAccent: boolean
@@ -323,6 +357,8 @@ export function usePictorium(): PictoriumCtx {
     networkLogo, setNetworkLogo,
     preRelease,
     ribbonSide,
+    posterShape, setPosterShape,
+    logoAlign, setLogoAlign,
     // Defaults
     defaultBadgeStyle,
     defaultRankingBadgeStyle,
@@ -334,6 +370,8 @@ export function usePictorium(): PictoriumCtx {
     defaultBadgeQuality,
     defaultCustomRatings,
     defaultRibbonSide,
+    defaultPosterShape,
+    defaultLogoAlign,
     setRibbonSide,
     defaultBlurEnabled,
     defaultBlurIntensity,
@@ -347,6 +385,7 @@ export function usePictorium(): PictoriumCtx {
     defaultGenreBadgeOffsetX, defaultGenreBadgeOffsetY, defaultQualityBadgeOffsetX, defaultQualityBadgeOffsetY,
     defaultNetworkLogoOffsetX, defaultNetworkLogoOffsetY,
     defaultAutoRotateClean,
+    defaultAutoRotateBackdrop,
     defaultNetworkLogo,
     loadDefaultsToState,
     // Blur
@@ -379,7 +418,7 @@ export function usePictorium(): PictoriumCtx {
     logoOffsetY, setLogoOffsetY,
     logoDisabled, setLogoDisabled,
     // Backdrop
-    setBackdrops,
+    backdrops, setBackdrops,
     selectedBackdrop, setSelectedBackdrop,
     backdropScale, setBackdropScale,
     backdropOffsetX, setBackdropOffsetX,
@@ -389,6 +428,9 @@ export function usePictorium(): PictoriumCtx {
     rotationPosters, setRotationPosters,
     autoRotateClean, setAutoRotateClean,
     excludedPosters, setExcludedPosters,
+    rotationBackdrops, setRotationBackdrops,
+    autoRotateBackdrop, setAutoRotateBackdrop,
+    excludedBackdrops, setExcludedBackdrops,
     // Episode Group
     episodeGroupId, setEpisodeGroupId,
   } = editorCtx
@@ -469,15 +511,21 @@ export function usePictorium(): PictoriumCtx {
 
   const logoBounds = useMemo(() => {
     if (!navigation.previewPoster || !navigation.selectedLogo) return { minX: -500, maxX: 500, minY: -500, maxY: 500 }
+    // Stessi vincoli del server (poster-service): in landscape il canvas è
+    // 16:9 con logo contenuto (max 40%, max 24% altezza) e sollevato
+    // (margine 25%), con l'allineamento corrente.
+    const isLandscapeShape = posterShape === "landscape"
     return computeLogoOffsetBounds({
-      posterW: navigation.previewPoster.width || 1000,
-      posterH: navigation.previewPoster.height || 1500,
+      posterW: isLandscapeShape ? LAND_W : (navigation.previewPoster.width || 1000),
+      posterH: isLandscapeShape ? LAND_H : (navigation.previewPoster.height || 1500),
       logoW: navigation.selectedLogo.width || 1,
       logoH: navigation.selectedLogo.height || 1,
       logoScale,
       hasBadges,
+      align: isLandscapeShape ? logoAlign : "center",
+      ...(isLandscapeShape ? { maxWidthPct: 40, maxHeightPct: 24, bottomMarginPct: 25, topOffset: 55 } : {}),
     })
-  }, [navigation.previewPoster, navigation.selectedLogo, logoScale, hasBadges])
+  }, [navigation.previewPoster, navigation.selectedLogo, logoScale, hasBadges, posterShape, logoAlign])
 
   // --- Custom Catalogs & Profile Auth Hooks ---
   const {
@@ -612,13 +660,13 @@ export function usePictorium(): PictoriumCtx {
     setUrlPattern(buildUrlPattern({
       globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle,
       badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources,
-      customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide,
+      customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
       topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
       genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
       networkLogoOffsetX, networkLogoOffsetY,
       tmdbKey, lang, mdblistApiKey,
     }))
-  }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
+  }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
 
   // --- Preview URL ---
   const buildPreviewUrlCb = useCallback(() => {
@@ -634,14 +682,14 @@ export function usePictorium(): PictoriumCtx {
         topEdgeColor, accentColor, lang, tmdbKey,
         region: editorCtx.defaultRegion,
       },
-      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
+      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
     )
     setPreviewUrl(url)
   }, [navigation.selected, navigation.previewPoster, navigation.selectedLogo, selectedBackdrop,
     logoScale, logoOffsetX, logoOffsetY, backdropScale, backdropOffsetX, backdropOffsetY,
     metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, accentColor, lang, tmdbKey,
     editorCtx.defaultRegion,
-    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
+    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
 
   // A1: trailing debounce della preview URL (200ms). Ogni tick di slider
   // cambia l'identità di buildPreviewUrlCb → senza debounce ogni pixel di
@@ -676,14 +724,27 @@ export function usePictorium(): PictoriumCtx {
     const rsrcParam = ratingSources && ratingSources.length > 0 ? "&rsrc=" + encodeURIComponent(ratingSources.join(",")) : ""
     const regionLang = getRegionDef(editorCtx.defaultRegion).lang
     const detailsUrl = `/api/tmdb/${itemId}/details?type=${itemType}&language=${regionLang}&api_key=${tmdbKey}${mdblistParam}${rsrcParam}`
+    // Le immagini partono SUBITO in parallelo ai details (non dopo): la lingua
+    // originale serve solo ad allargare la query quando è fuori da lang/en.
+    // Niente retry qui: i dati si ricaricano al tick dopo, e un retry
+    // triplicherebbe la coda peggiore (30s × 3) proprio sul path critico.
+    const defaultImageLangs = `${lang},en,null`
+    const imagesUrl = (langs: string) => `/api/tmdb/${itemId}/images?type=${itemType}&languages=${langs}&api_key=${tmdbKey}`
+    const emptyLists: ImageLists = { posters: [], logos: [], backdrops: [] }
+    const imagesPromise = http<ImageLists>(imagesUrl(defaultImageLangs), { timeout: 30000, retries: 0 }).catch(() => emptyLists)
     const [details, rankData, awardData] = await Promise.all([
-      http<{ genres: { id: number; name: string }[]; voteAverage: number; voteCount: number; status: string | null; type: string | null; release_date: string | null; first_air_date: string | null; last_air_date: string | null; next_episode_to_air: { air_date: string; episode_number: number; season_number: number } | null; number_of_seasons: number | null; number_of_episodes: number | null; title: string | null; name: string | null; imdb_id: string | null; networks: { name: string; logo_path: string | null; origin_country: string }[]; production_companies: { name: string; logo_path: string | null; origin_country: string }[]; original_language: string; aggregatedRatings?: AggregatedRatings | null }>(detailsUrl, { timeout: 30000 }).catch((e) => { console.error("[pictorium] Details fetch failed:", e); setServiceErrors((prev) => ({ ...prev, tmdb: true })); return { genres: [] as { id: number; name: string }[], voteAverage: 0, voteCount: 0, status: null, type: null, release_date: null, first_air_date: null, last_air_date: null, next_episode_to_air: null, number_of_seasons: null, number_of_episodes: null, title: null, name: null, imdb_id: null, networks: [] as { name: string; logo_path: string | null; origin_country: string }[], production_companies: [] as { name: string; logo_path: string | null; origin_country: string }[], original_language: "en", aggregatedRatings: null } }),
+      http<{ genres: { id: number; name: string }[]; voteAverage: number; voteCount: number; status: string | null; type: string | null; release_date: string | null; first_air_date: string | null; last_air_date: string | null; next_episode_to_air: { air_date: string; episode_number: number; season_number: number } | null; number_of_seasons: number | null; number_of_episodes: number | null; title: string | null; name: string | null; imdb_id: string | null; networks: { name: string; logo_path: string | null; origin_country?: string }[]; production_companies: { name: string; logo_path: string | null; origin_country?: string }[]; original_language: string; aggregatedRatings?: AggregatedRatings | null }>(detailsUrl, { timeout: 30000 }).catch((e) => { console.error("[pictorium] Details fetch failed:", e); setServiceErrors((prev) => ({ ...prev, tmdb: true })); return { genres: [] as { id: number; name: string }[], voteAverage: 0, voteCount: 0, status: null, type: null, release_date: null, first_air_date: null, last_air_date: null, next_episode_to_air: null, number_of_seasons: null, number_of_episodes: null, title: null, name: null, imdb_id: null, networks: [] as { name: string; logo_path: string | null; origin_country?: string }[], production_companies: [] as { name: string; logo_path: string | null; origin_country?: string }[], original_language: "en", aggregatedRatings: null } }),
       http<{ rank: number | null }>(`/api/trending/rank?type=${itemType}&id=${itemId}&api_key=${encodeURIComponent(tmdbKey)}&region=${encodeURIComponent(editorCtx.defaultRegion)}&lang=${encodeURIComponent(regionLang)}`, { timeout: 15000 }).catch(() => ({ rank: null })),
       http<{ awards: string[]; nominations: string[]; studios: string[]; director: string | null; keywords: string[] }>(`/api/awards/${itemType}/${itemId}?api_key=${encodeURIComponent(tmdbKey)}`, { timeout: 15000 }).catch(() => ({ awards: [] as string[], nominations: [] as string[], studios: [] as string[], director: null, keywords: [] as string[] })),
     ])
     const origLang = details.original_language
-    const imageLangs = origLang && origLang !== lang && origLang !== "en" ? `${lang},en,null,${origLang}` : `${lang},en,null`
-    const data = await http<{ posters: TMDBImage[]; logos: TMDBImage[]; backdrops: TMDBImage[] }>(`/api/tmdb/${itemId}/images?type=${itemType}&languages=${imageLangs}&api_key=${tmdbKey}`, { timeout: 30000 }).catch(() => ({ posters: [] as TMDBImage[], logos: [] as TMDBImage[], backdrops: [] as TMDBImage[] }))
+    const imageLangs = origLang && origLang !== lang && origLang !== "en" ? `${defaultImageLangs},${origLang}` : defaultImageLangs
+    let data = await imagesPromise
+    if (imageLangs !== defaultImageLangs) {
+      // Solo quando la lingua originale aggiunge copertura: refetch e merge.
+      const extra = await http<ImageLists>(imagesUrl(imageLangs), { timeout: 30000, retries: 0 }).catch(() => null)
+      if (extra && navigation.fetchIdRef.current === fetchId) data = mergeImageLists(data, extra)
+    }
     if (navigation.fetchIdRef.current !== fetchId) return null
     navigation.setSelected({ ...item, imdb_id: details.imdb_id })
     navigation.setPosters(data.posters || [])
@@ -822,30 +883,41 @@ export function usePictorium(): PictoriumCtx {
       // ribbonSide solo globale: i mapping storici con valore salvato lo ignorano,
       // così la preview resta sincrona con Stremio (side dal default d'istanza).
       setRibbonSide(defaultRibbonSide)
-      setGradientHeight(existing.gradientHeight ?? defaultGradientHeight)
-      setTopBadgeScale(existing.topBadgeScale ?? defaultTopBadgeScale)
-      setTopBadgeOffsetX(existing.topBadgeOffsetX ?? defaultTopBadgeOffsetX)
-      setTopBadgeOffsetY(existing.topBadgeOffsetY ?? defaultTopBadgeOffsetY)
-      setGenreBadgeScale(existing.genreBadgeScale ?? defaultGenreBadgeScale)
-      setQualityBadgeScale(existing.qualityBadgeScale ?? defaultQualityBadgeScale)
-      setNetworkLogoScale(existing.networkLogoScale ?? defaultNetworkLogoScale)
-      setGenreBadgeOffsetX(existing.genreBadgeOffsetX ?? defaultGenreBadgeOffsetX)
-      setGenreBadgeOffsetY(existing.genreBadgeOffsetY ?? defaultGenreBadgeOffsetY)
-      setQualityBadgeOffsetX(existing.qualityBadgeOffsetX ?? defaultQualityBadgeOffsetX)
-      setQualityBadgeOffsetY(existing.qualityBadgeOffsetY ?? defaultQualityBadgeOffsetY)
-      setNetworkLogoOffsetX(existing.networkLogoOffsetX ?? defaultNetworkLogoOffsetX)
-      setNetworkLogoOffsetY(existing.networkLogoOffsetY ?? defaultNetworkLogoOffsetY)
-      setBlurIntensity(existing.blurIntensity ?? defaultBlurIntensity)
-      setBlurFade(existing.blurFade ?? defaultBlurFade)
-      setBlurDarkness(existing.blurDarkness ?? defaultBlurDarkness)
-      setBlurEnabled(existing.blurEnabled ?? defaultBlurEnabled)
+      setPosterShape(existing.posterShape ?? defaultPosterShape)
+      // Allineamento fisso per formato (verticale sempre centro,
+      // orizzontale default globale o sinistra): nessun settaggio deve
+      // mai spostare i portrait (contratto legacy).
+      setLogoAlign((existing.posterShape ?? defaultPosterShape) === "landscape" ? (defaultLogoAlign ?? "left") : "center")
+      // Profili per-formato: all'apertura gli slider mostrano il tuning
+      // effettivo del formato salvato (landscape = profilo orizzontale).
+      const eff = effectiveMappingForShape(existing ?? null, existing?.posterShape ?? defaultPosterShape)
+      setGradientHeight(eff?.gradientHeight ?? defaultGradientHeight)
+      setTopBadgeScale(eff?.topBadgeScale ?? defaultTopBadgeScale)
+      setTopBadgeOffsetX(eff?.topBadgeOffsetX ?? defaultTopBadgeOffsetX)
+      setTopBadgeOffsetY(eff?.topBadgeOffsetY ?? defaultTopBadgeOffsetY)
+      setGenreBadgeScale(eff?.genreBadgeScale ?? defaultGenreBadgeScale)
+      setQualityBadgeScale(eff?.qualityBadgeScale ?? defaultQualityBadgeScale)
+      setNetworkLogoScale(eff?.networkLogoScale ?? defaultNetworkLogoScale)
+      setGenreBadgeOffsetX(eff?.genreBadgeOffsetX ?? defaultGenreBadgeOffsetX)
+      setGenreBadgeOffsetY(eff?.genreBadgeOffsetY ?? defaultGenreBadgeOffsetY)
+      setQualityBadgeOffsetX(eff?.qualityBadgeOffsetX ?? defaultQualityBadgeOffsetX)
+      setQualityBadgeOffsetY(eff?.qualityBadgeOffsetY ?? defaultQualityBadgeOffsetY)
+      setNetworkLogoOffsetX(eff?.networkLogoOffsetX ?? defaultNetworkLogoOffsetX)
+      setNetworkLogoOffsetY(eff?.networkLogoOffsetY ?? defaultNetworkLogoOffsetY)
+      setBlurIntensity(eff?.blurIntensity ?? defaultBlurIntensity)
+      setBlurFade(eff?.blurFade ?? defaultBlurFade)
+      setBlurDarkness(eff?.blurDarkness ?? defaultBlurDarkness)
+      setBlurEnabled(eff?.blurEnabled ?? defaultBlurEnabled)
       setCustomBadge(existing.customBadge ?? null)
       setRotationPosters(existing.cleanPosters || [])
       setAutoRotateClean(existing.autoRotateClean ?? defaultAutoRotateClean)
       setExcludedPosters(existing.excludedPosters || [])
+      setRotationBackdrops(existing.cleanBackdrops || [])
+      setAutoRotateBackdrop(existing.autoRotateBackdrop ?? defaultAutoRotateBackdrop)
+      setExcludedBackdrops(existing.excludedBackdrops || [])
       setLogoDisabled(existing.logoDisabled ?? false)
-      setLogoOffsetX(existing.logoOffsetX ?? 0)
-      setLogoOffsetY(existing.logoOffsetY ?? 0)
+      setLogoOffsetX(eff?.logoOffsetX ?? 0)
+      setLogoOffsetY(eff?.logoOffsetY ?? 0)
       setBackdropScale(existing.backdropScale ?? 100)
       setBackdropOffsetX(existing.backdropOffsetX ?? 0)
       setBackdropOffsetY(existing.backdropOffsetY ?? 0)
@@ -866,10 +938,15 @@ export function usePictorium(): PictoriumCtx {
       setBlurEnabled(defaultBlurEnabled)
       setNetworkLogo(defaultNetworkLogo)
       setRibbonSide(defaultRibbonSide)
+      setPosterShape(defaultPosterShape)
+      setLogoAlign(defaultPosterShape === "landscape" ? (defaultLogoAlign ?? "left") : "center")
       setCustomBadge(null)
       setRotationPosters([])
       setAutoRotateClean(defaultAutoRotateClean)
       setExcludedPosters([])
+      setRotationBackdrops([])
+      setAutoRotateBackdrop(defaultAutoRotateBackdrop)
+      setExcludedBackdrops([])
       setLogoDisabled(false)
       setLogoOffsetX(0)
       setLogoOffsetY(0)
@@ -899,7 +976,7 @@ export function usePictorium(): PictoriumCtx {
             if (scale !== null) setLogoScale(scale)
           }
         }
-        setLogoScale(existing.logoScale ?? 75)
+        setLogoScale(effectiveMappingForShape(existing, existing.posterShape ?? defaultPosterShape)?.logoScale ?? 75)
         if (existing.backdropPath && data.backdrops) {
           const foundBackdrop = data.backdrops.find((b: TMDBImage) => b.file_path === existing.backdropPath)
           setSelectedBackdrop(foundBackdrop || { file_path: existing.backdropPath, iso_639_1: null, vote_average: 0, width: 0, height: 0 })
@@ -976,7 +1053,8 @@ export function usePictorium(): PictoriumCtx {
     networkLogoOffsetX, networkLogoOffsetY,
     setGradientHeight,
     rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, logoDisabled, setLogoDisabled,
-    setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId,
+    rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops,
+    setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId, posterShape,
   })
 
   const saveConfig = useCallback(async () => {
@@ -991,6 +1069,30 @@ export function usePictorium(): PictoriumCtx {
       silent: true,
     })
   }, [savePosterConfig, rotationPosters])
+
+  const autoSaveExcludedBackdrops = useCallback(async (nextExcluded: string[], nextRotationBackdrops?: string[]) => {
+    await savePosterConfig({
+      excludedBackdrops: nextExcluded,
+      rotationBackdrops: nextRotationBackdrops ?? rotationBackdrops,
+      silent: true,
+    })
+  }, [savePosterConfig, rotationBackdrops])
+
+  // Prefetch hover sui risultati di ricerca: scalda le cache server
+  // (details + images) così aprendo l'editor trova tutto già caldo.
+  // Fire-and-forget con dedup per titolo; niente retry per non inseguire
+  // un hover con richieste zombie.
+  const prefetchedRef = useRef<Set<string>>(new Set())
+  const prefetchTitle = useCallback((item: SearchResult) => {
+    const key = `${item.media_type}:${item.id}`
+    if (prefetchedRef.current.has(key)) return
+    if (prefetchedRef.current.size > 200) prefetchedRef.current.clear()
+    prefetchedRef.current.add(key)
+    const rLang = getRegionDef(editorCtx.defaultRegion).lang
+    const langs = `${lang},en,null`
+    http(`/api/tmdb/${item.id}/details?type=${item.media_type}&language=${rLang}&api_key=${tmdbKey}`, { timeout: 15000, retries: 0 }).catch(() => null)
+    http(`/api/tmdb/${item.id}/images?type=${item.media_type}&languages=${langs}&api_key=${tmdbKey}`, { timeout: 15000, retries: 0 }).catch(() => null)
+  }, [tmdbKey, lang, editorCtx.defaultRegion])
 
   return useMemo(() => ({
     selected: navigation.selected, setSelected: navigation.setSelected,
@@ -1034,6 +1136,8 @@ export function usePictorium(): PictoriumCtx {
     accentColor, autoAccentColor, setAccentColor,
     topEdgeColor,
     autoSaveExcludedPosters,
+    autoSaveExcludedBackdrops,
+    prefetchTitle,
     theme, setTheme,
     uiAccent, setUiAccent,
     serviceErrors, setServiceErrors,
@@ -1056,7 +1160,7 @@ export function usePictorium(): PictoriumCtx {
     langOpen, settingsOpen, showLangPicker,
     tmdbKeyInput, showKey, copied, mdblistApiKey, tvdbApiKey,
     accentColor, autoAccentColor, setAccentColor,
-    topEdgeColor, autoSaveExcludedPosters,
+    topEdgeColor, autoSaveExcludedPosters, autoSaveExcludedBackdrops, prefetchTitle,
     trending.trending, trending.trendingError, trending.streamingCharts, trending.mdblistAnimeList,
     trending.refreshLists,
     theme, uiAccent, serviceErrors, hasNetflixRank,

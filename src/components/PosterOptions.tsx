@@ -66,7 +66,7 @@ export function PosterOptions({ posters, posterActivePath, lang, selectPoster, a
   let idx = 0
 
   const { bestFitPath, results, loading: fitLoading, error: fitError } = usePosterFit({
-    enabled: ed.defaultLogoFitEnabled,
+    enabled: ed.defaultPortraitFitEnabled,
     selectedLogo: selectedLogo,
     cleanPosters,
     logoScale: ed.logoScale,
@@ -124,7 +124,7 @@ export function PosterOptions({ posters, posterActivePath, lang, selectPoster, a
   }, [selected?.id])
 
   const autoSelectFitKey = useMemo(() => {
-    if (!ed.defaultLogoFitEnabled || !bestPoster || !selectedLogo) return null
+    if (!ed.defaultPortraitFitEnabled || !bestPoster || !selectedLogo) return null
     return JSON.stringify([
       bestPoster.file_path,
       cleanPosters.map((poster) => poster.file_path),
@@ -134,7 +134,7 @@ export function PosterOptions({ posters, posterActivePath, lang, selectPoster, a
   }, [
     bestPoster,
     cleanPosters,
-    ed.defaultLogoFitEnabled,
+    ed.defaultPortraitFitEnabled,
     ed.globalBadges,
     selectedLogo,
   ])

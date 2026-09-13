@@ -342,8 +342,12 @@ const MAX_CONCURRENT_RENDERS = (() => {
 // slot), quindi allungare l'attesa è memory-neutral.
 export const RENDER_SLOT_WAIT_MS = (() => {
   const raw = envWithFallback("RENDER_SLOT_WAIT_MS")
-  const n = raw ? parseInt(raw, 10) : 15000
-  return Number.isFinite(n) && n >= 500 && n <= 60000 ? n : 15000
+  // Vercel Hobby: 10s di limite funzione — con 15s di attesa la piattaforma
+  // chiuderebbe con 504 prima del nostro 503. Default hobby-safe SOLO se
+  // l'utente non ha impostato un valore esplicito (su Pro vale il default).
+  const fallback = process.env.VERCEL && raw === undefined ? 7500 : 15000
+  const n = raw ? parseInt(raw, 10) : fallback
+  return Number.isFinite(n) && n >= 500 && n <= 60000 ? n : fallback
 })()
 // Coda bounded (opzionale): con 0 il comportamento è attuale (i waiter oltre i
 // posti attendono fino a RENDER_SLOT_WAIT_MS). Con N>0 i waiter oltre N

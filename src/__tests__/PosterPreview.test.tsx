@@ -90,4 +90,27 @@ describe("PosterPreview", () => {
     expect(setImageError).toHaveBeenCalledWith(false)
     expect(onRetry).toHaveBeenCalledTimes(1)
   })
+
+  it("keeps the old buffer behind until the new image loads", () => {
+    const { container, rerender } = renderWithCtx(
+      <PosterPreview {...BASE_PROPS} imgSrc="https://example.com/a.jpg" />,
+      { selected: SELECTED_MOVIE, previewUrl: "https://example.com/preview", t },
+    )
+    const first = container.querySelector('img[src="https://example.com/a.jpg"]')
+    expect(first).toBeTruthy()
+    fireEvent.load(first!)
+
+    rerender(
+      <PosterPreview {...BASE_PROPS} imgSrc="https://example.com/b.jpg" />,
+    )
+    // Vecchio buffer ancora dietro, nuovo subito visibile (progressivo).
+    expect(container.querySelector('img[src="https://example.com/a.jpg"]')).toBeTruthy()
+    const second = container.querySelector('img[src="https://example.com/b.jpg"]')
+    expect(second).toBeTruthy()
+
+    fireEvent.load(second!)
+    // A load completato il vecchio viene rimosso (un solo buffer).
+    expect(container.querySelector('img[src="https://example.com/a.jpg"]')).toBeNull()
+    expect(container.querySelector('img[src="https://example.com/b.jpg"]')).toBeTruthy()
+  })
 })

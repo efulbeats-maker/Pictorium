@@ -1,5 +1,6 @@
 import { POSTER_URL_VERSION } from "@/lib/render-version"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
+import type { PosterShape } from "@/lib/types"
 
 export interface StremioPosterParamsInput {
   // NOTA SICUREZZA (M2): niente chiavi qui. Questo builder serve URL poster
@@ -51,6 +52,15 @@ export interface StremioPosterParamsInput {
   /** Effetto pre-digitale (darken + Coming Soon, solo film). Default OFF. */
   readonly preRelease?: boolean
   readonly ribbonSide?: "left" | "right"
+  /** Formato canvas: emesso come `shape=landscape` solo quando landscape
+   *  (il portrait è il default e resta omesso per non invalidare la cache). */
+  readonly posterShape?: PosterShape
+  /**
+   * Allineamento blocco logo/metadati. Emesso solo quando diverso dal
+   * default di formato (landscape "left", poster "center"): i default
+   * non invalidano la cache e il server li risolve da solo.
+   */
+  readonly logoAlign?: "left" | "center"
   /** Badge extra testuale per-titolo (dal mapping): emesso come `extra`. */
   readonly customBadge?: string | null
   /** Titolo per-titolo (dal mapping): match JustWatch per rilevamento
@@ -113,6 +123,10 @@ export function buildStremioPosterSearchParams(input: StremioPosterParamsInput):
   if (input.preRelease) params.set("pre", "1")
   if (input.ribbonSide === "right") params.set("side", "right")
   else if (input.ribbonSide === "left") params.set("side", "left")
+  if (input.posterShape === "landscape") {
+    params.set("shape", "landscape")
+    if (input.logoAlign === "center") params.set("align", "center")
+  }
   params.set("lang", input.lang || "it")
   if (!blurEnabled) params.set("be", "0")
   params.set("gradHeight", String(input.gradientHeight ?? DEFAULT_STREMIO_POSTER_PARAMS.gradientHeight))

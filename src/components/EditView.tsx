@@ -6,7 +6,9 @@ import { usePSelector } from "@/lib/context"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { usePosterEditor } from "@/lib/contexts/PosterEditorContext"
 import type { TMDBImage } from "@/lib/types"
+import { effectiveMappingForShape, type LandscapeSettings } from "@/lib/types"
 import { PosterOptions } from "@/components/PosterOptions"
+import { BackdropOptions } from "@/components/BackdropOptions"
 import { LogoOptions } from "@/components/LogoOptions"
 import { EditorPanel } from "@/components/EditorPanel"
 import { buildPreviewUrl } from "@/lib/poster-url"
@@ -22,7 +24,7 @@ import { TransformControls } from "@/components/TransformControls"
 import { EpisodeGroupControls } from "@/components/EpisodeGroupControls"
 import { JwRankBadge } from "@/components/JwRankBadge"
 import { usePosterPreview } from "@/lib/usePosterPreview"
-import { Check, Clock, ExternalLink, Save, Trash2, X, ChevronLeft } from "lucide-react"
+import { Check, Clock, ExternalLink, Save, Trash2, X, ChevronLeft, RectangleVertical, RectangleHorizontal } from "lucide-react"
 
 export default function EditView() {
   const accentColor = usePSelector((v) => v.accentColor)
@@ -48,6 +50,8 @@ export default function EditView() {
   const selectedLogo = usePSelector((v) => v.selectedLogo)
   const selectLogo = usePSelector((v) => v.selectLogo)
   const selectPoster = usePSelector((v) => v.selectPoster)
+  const selectBackdrop = usePSelector((v) => v.selectBackdrop)
+  const removeBackdrop = usePSelector((v) => v.removeBackdrop)
   const setPreviewId = usePSelector((v) => v.setPreviewId)
   const setPreviewPoster = usePSelector((v) => v.setPreviewPoster)
   const setQuery = usePSelector((v) => v.setQuery)
@@ -87,12 +91,98 @@ export default function EditView() {
   // Mobile: dopo il tap su un poster salta ad "Anteprima" (nella tab Poster
   // non si vedrebbe alcun feedback). Solo sotto lg, dove lo switcher esiste;
   // su desktop resti dove sei per confrontare varianti.
-  const handleSelectPoster = useCallback((img: TMDBImage) => {
-    void selectPoster(img)
+  // Landscape: senza sfondo esplicito seleziona in automatico uno sfondo.
+  // - Titolo con mapping che HA un backdrop: ripristina quello salvato
+  //   (mai sovrascritto dal primo TMDB).
+  // - Mapping senza backdrop o titolo nuovo: primo sfondo TMDB.
+  const selectedMappingKey = selected ? `${selected.media_type}:${selected.id}` : null
+  const selectedMapping = selectedMappingKey ? mappingsMap.get(selectedMappingKey) : undefined
+  const hasMapping = !!selectedMapping
+  useEffect(() => {
+    if (ed.posterShape !== "landscape") return
+    if (ed.selectedBackdrop) return
+    if (selectedMapping?.backdropPath) {
+      // Ripristino diretto (NON selectBackdrop: quello azzererebbe
+      // backdropScale/offset già caricati dal mapping).
+      const saved = ed.backdrops.find((b) => b.file_path === selectedMapping.backdropPath)
+      ed.setSelectedBackdrop(saved ?? { file_path: selectedMapping.backdropPath, iso_639_1: null, vote_average: 0, width: 0, height: 0 })
+      return
+    }
+    if (hasMapping) return
+    if (ed.backdrops.length === 0) return
+    void selectBackdrop(ed.backdrops[0])
+  }, [ed.posterShape, ed.selectedBackdrop, hasMapping, selectedMapping, ed.backdrops, selectBackdrop]) // eslint-disable-line react-hooks/exhaustive-deps -- dipendenze granulari intenzionali: `ed` intero rifarebbe scattare l'effetto a ogni tick editor e riselezionerebbe dopo una deselezione volontaria
+
+  // Dual-format: stash degli slider non salvati per formato. Senza, passare
+  // da A a B e ritorno perderebbe in silenzio le modifiche non salvate di A
+  // (lo switch caricherebbe i valori salvati di B sopra quelle di A). Lo
+  // stash è per-titolo: cambiando titolo si azzera (selectedMappingKey).
+  const shapeStashRef = useRef<Partial<Record<"poster" | "landscape", LandscapeSettings>>>({})
+  const shapeStashKeyRef = useRef<string | null>(null)
+  // Cambio formato: portrait deseleziona sempre lo sfondo (in verticale
+  // `poster=` + `backdrop=` comporrebbero la banda sopra il poster),
+  // landscape lascia fare all'effetto sopra. Gli slider passano al profilo
+  // del formato scelto (stash non salvato > profilo salvato), così la
+  // preview WYSIWYG mostra il tuning reale di quel formato.
+  const handleShapeChange = useCallback((next: "poster" | "landscape") => {
+    const prev = ed.posterShape
+    if (prev === next) return
+    const stashKey = selectedMappingKey ?? "new"
+    if (shapeStashKeyRef.current !== stashKey) {
+      shapeStashRef.current = {}
+      shapeStashKeyRef.current = stashKey
+    }
+    shapeStashRef.current[prev] = {
+      logoScale: ed.logoScale, logoOffsetX: ed.logoOffsetX, logoOffsetY: ed.logoOffsetY,
+      topBadgeScale: ed.topBadgeScale, topBadgeOffsetX: ed.topBadgeOffsetX, topBadgeOffsetY: ed.topBadgeOffsetY,
+      genreBadgeScale: ed.genreBadgeScale, genreBadgeOffsetX: ed.genreBadgeOffsetX, genreBadgeOffsetY: ed.genreBadgeOffsetY,
+      qualityBadgeScale: ed.qualityBadgeScale, qualityBadgeOffsetX: ed.qualityBadgeOffsetX, qualityBadgeOffsetY: ed.qualityBadgeOffsetY,
+      networkLogoScale: ed.networkLogoScale, networkLogoOffsetX: ed.networkLogoOffsetX, networkLogoOffsetY: ed.networkLogoOffsetY,
+      gradientHeight: ed.gradientHeight, blurEnabled: ed.blurEnabled,
+      blurIntensity: ed.blurIntensity, blurFade: ed.blurFade, blurDarkness: ed.blurDarkness,
+    }
+    if (next === "poster") removeBackdrop()
+    ed.setPosterShape(next)
+    ed.setLogoAlign(next === "landscape" ? (ed.defaultLogoAlign ?? "left") : "center")
+    const src = shapeStashRef.current[next]
+      ?? (selectedMapping ? effectiveMappingForShape(selectedMapping, next) : null)
+    if (src) {
+      ed.setLogoScale(src.logoScale ?? ed.logoScale)
+      ed.setLogoOffsetX(src.logoOffsetX ?? ed.logoOffsetX)
+      ed.setLogoOffsetY(src.logoOffsetY ?? ed.logoOffsetY)
+      ed.setTopBadgeScale(src.topBadgeScale ?? ed.topBadgeScale)
+      ed.setTopBadgeOffsetX(src.topBadgeOffsetX ?? ed.topBadgeOffsetX)
+      ed.setTopBadgeOffsetY(src.topBadgeOffsetY ?? ed.topBadgeOffsetY)
+      ed.setGenreBadgeScale(src.genreBadgeScale ?? ed.genreBadgeScale)
+      ed.setGenreBadgeOffsetX(src.genreBadgeOffsetX ?? ed.genreBadgeOffsetX)
+      ed.setGenreBadgeOffsetY(src.genreBadgeOffsetY ?? ed.genreBadgeOffsetY)
+      ed.setQualityBadgeScale(src.qualityBadgeScale ?? ed.qualityBadgeScale)
+      ed.setQualityBadgeOffsetX(src.qualityBadgeOffsetX ?? ed.qualityBadgeOffsetX)
+      ed.setQualityBadgeOffsetY(src.qualityBadgeOffsetY ?? ed.qualityBadgeOffsetY)
+      ed.setNetworkLogoScale(src.networkLogoScale ?? ed.networkLogoScale)
+      ed.setNetworkLogoOffsetX(src.networkLogoOffsetX ?? ed.networkLogoOffsetX)
+      ed.setNetworkLogoOffsetY(src.networkLogoOffsetY ?? ed.networkLogoOffsetY)
+      ed.setGradientHeight(src.gradientHeight ?? ed.gradientHeight)
+      ed.setBlurEnabled(src.blurEnabled ?? ed.blurEnabled)
+      ed.setBlurIntensity(src.blurIntensity ?? ed.blurIntensity)
+      ed.setBlurFade(src.blurFade ?? ed.blurFade)
+      ed.setBlurDarkness(src.blurDarkness ?? ed.blurDarkness)
+    }
+  }, [ed, removeBackdrop, selectedMapping, selectedMappingKey])
+
+  const handleSelectPoster = useCallback((img: TMDBImage) => {    void selectPoster(img)
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023.5px)").matches) {
       setMobileSection("preview")
     }
   }, [selectPoster])
+
+  // Landscape: tap sullo sfondo salta all'anteprima (come i poster).
+  const handleSelectBackdrop = useCallback((img: TMDBImage) => {
+    void selectBackdrop(img)
+    if (typeof window !== "undefined" && window.matchMedia("(max-width: 1023.5px)").matches) {
+      setMobileSection("preview")
+    }
+  }, [selectBackdrop])
 
   const searchBar = (
     <div className={selected ? "w-full max-w-lg relative z-[100] isolate" : "max-w-lg mx-auto relative z-[100] isolate mb-8"}>
@@ -180,6 +270,7 @@ export default function EditView() {
   }, [selectedId, selectedImdbId, selectedMediaType, tvdbApiKey, tmdbKey])
 
   const cleanPoster = previewPoster?.iso_639_1 === null
+  const isLandscape = ed.posterShape === "landscape"
 
   // Memoizzato: l'array entra nel deps array dell'effect sotto e non deve
   // cambiare identità a ogni render (react-hooks/exhaustive-deps).
@@ -299,11 +390,13 @@ export default function EditView() {
 
           <div className="editor-workspace w-full px-2 sm:px-4 md:px-6 lg:h-[clamp(660px,calc(100dvh-260px),830px)] lg:min-h-0">
 
-            {/* LEFT: Poster */}
+            {/* LEFT: Poster (verticale) o Sfondi (orizzontale) */}
             <div className={mobileSection === "poster" ? "block w-full" : "hidden lg:block h-full min-w-0"}>
-              <EditorPanel className="animate-fade-scale-in-panel-left h-full" aria-label={`${selected?.title || ""} — Poster selection`} title={t("ui.posterAvailable")} headerRight={<span className="text-[10px] font-mono text-muted px-1.5 py-0.5 rounded-md bg-white/[0.05] border border-white/10 tabular-nums">{posters.length}</span>}>
+              <EditorPanel className="animate-fade-scale-in-panel-left h-full" aria-label={`${selected?.title || ""} — Poster selection`} title={isLandscape ? t("ui.backdropAvailable") : t("ui.posterAvailable")} headerRight={<span className="text-[10px] font-mono text-muted px-1.5 py-0.5 rounded-md bg-white/[0.05] border border-white/10 tabular-nums">{isLandscape ? ed.backdrops.length : posters.length}</span>}>
                 {loadingImages ? (
                   <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-8 rounded-lg skeleton-shimmer" />)}</div>
+                ) : isLandscape ? (
+                  <BackdropOptions backdrops={ed.backdrops} backdropActivePath={ed.selectedBackdrop?.file_path ?? null} selectBackdrop={handleSelectBackdrop} clearBackdrop={removeBackdrop} loading={loadingImages} />
                 ) : (
                   <PosterOptions posters={posters} posterActivePath={posterActivePath}
                     lang={lang} selectPoster={handleSelectPoster} activeGroup={activePosterTab} onActiveGroupChange={setActivePosterTab}
@@ -314,7 +407,38 @@ export default function EditView() {
 
             {/* CENTER: Preview */}
             <div className={mobileSection === "preview" ? "block w-full" : "hidden lg:block h-full min-w-0"}>
-              <EditorPanel className="animate-fade-scale-in h-full" title={<><span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle shadow-[0_0_6px_rgba(52,211,153,0.7)]" aria-hidden="true" />{t("ui.previewLive")}</>} footer={
+              <EditorPanel className="animate-fade-scale-in h-full" title={<><span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 align-middle shadow-[0_0_6px_rgba(52,211,153,0.7)]" aria-hidden="true" />{t("ui.previewLive")}</>} headerRight={
+                <div className="flex gap-1" role="group" aria-label={t("ui.posterShape")}>
+                  <button
+                    type="button"
+                    title={t("ui.posterShapePortrait")}
+                    aria-label={t("ui.posterShapePortrait")}
+                    aria-pressed={ed.posterShape !== "landscape"}
+                    onClick={() => handleShapeChange("poster")}
+                    className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all duration-150 cursor-pointer ${
+                      ed.posterShape !== "landscape"
+                        ? "bg-white/20 text-white shadow-sm"
+                        : "bg-white/5 text-muted hover:bg-white/10 hover:text-zinc-200"
+                    }`}
+                  >
+                    <RectangleVertical className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    title={t("ui.posterShapeLandscape")}
+                    aria-label={t("ui.posterShapeLandscape")}
+                    aria-pressed={ed.posterShape === "landscape"}
+                    onClick={() => handleShapeChange("landscape")}
+                    className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all duration-150 cursor-pointer ${
+                      ed.posterShape === "landscape"
+                        ? "bg-white/20 text-white shadow-sm"
+                        : "bg-white/5 text-muted hover:bg-white/10 hover:text-zinc-200"
+                    }`}
+                  >
+                    <RectangleHorizontal className="w-4 h-4" />
+                  </button>
+                </div>
+              } footer={
                 previewPoster && selected ? (
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     {(() => {
@@ -368,6 +492,8 @@ export default function EditView() {
                         blurEnabled: ed.blurEnabled,
                         networkLogo: ed.networkLogo,
                         ribbonSide: ed.ribbonSide,
+                        posterShape: ed.posterShape,
+                        logoAlign: ed.logoAlign,
                         topBadgeScale: ed.topBadgeScale,
                         topBadgeOffsetX: ed.topBadgeOffsetX,
                         topBadgeOffsetY: ed.topBadgeOffsetY,
@@ -396,7 +522,7 @@ export default function EditView() {
               ) : undefined}>
               <div className="flex flex-col items-center h-full min-h-0">
                 <div className="flex-1 min-h-0 w-full flex items-center justify-center">
-                  <div className="editor-preview-fit relative">
+                  <div className={`editor-preview-fit relative ${isLandscape ? "editor-preview-fit-landscape" : ""}`}>
                     <div className={`editor-stage editor-stage-fill isolate ${previewPoster?.file_path ? "editor-stage-glow" : ""}`}>
                       {/* NuvioDesktop-style depth edge */}
                       <PosterDepthEdge edgeStrength={40} edgeCoverage={10} />
@@ -417,6 +543,7 @@ export default function EditView() {
                           setImageError={setImageError}
                           imgSrc={imgSrc}
                           onRetry={retry}
+                          landscape={ed.posterShape === "landscape"}
                         />
                       </div>
                       <PosterDepthSheen sheenStrength={20} />

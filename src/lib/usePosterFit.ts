@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import type { TMDBImage } from "@/lib/types"
+import type { TMDBImage, PosterShape } from "@/lib/types"
 
 interface PosterFitMetrics {
   cleanliness: number
@@ -30,6 +30,11 @@ export interface UsePosterFitInput {
   logoOffsetX: number
   logoOffsetY: number
   hasBadges: boolean
+  /** Formato canvas: "landscape" analizza sfondi 16:9 a 768×432 con layout
+   *  Cinematic Left. Default "poster". */
+  shape?: PosterShape
+  /** Tier dimensionale TMDB dei candidati (default w342, w780 in landscape). */
+  posterSize?: "w342" | "w500" | "w780" | "w300"
 }
 
 export interface UsePosterFitResult {
@@ -70,6 +75,8 @@ function serialise(input: UsePosterFitInput): string | null {
     input.logoOffsetX,
     input.logoOffsetY,
     input.hasBadges,
+    input.shape ?? "poster",
+    input.posterSize ?? (input.shape === "landscape" ? "w780" : "w342"),
   ])
 }
 
@@ -131,6 +138,8 @@ export function usePosterFit(input: UsePosterFitInput): UsePosterFitResult {
             logoOffsetX: inp.logoOffsetX,
             logoOffsetY: inp.logoOffsetY,
             hasBadges: inp.hasBadges,
+            shape: inp.shape ?? "poster",
+            posterSize: inp.posterSize ?? (inp.shape === "landscape" ? "w780" : "w342"),
             voteAverages: inp.cleanPosters.map((p) => p.vote_average),
             widths: inp.cleanPosters.map((p) => p.width),
             heights: inp.cleanPosters.map((p) => p.height),

@@ -2,10 +2,11 @@ import sharp from "sharp"
 import type { RatingItem } from "./custom-rating/types"
 import { renderMultiRatings } from "./multi-rating-renderer"
 import { cacheGet, cacheSet } from "./cache"
-import { GENRE_FALLBACK, cinematicVignetteSVG } from "./badges"
+import { GENRE_FALLBACK, cinematicVignetteSVG, cinematicCornerGradientSVG } from "./badges"
 import { applyBlur } from "./blur"
 import {
-  STD_W, STD_H,
+  STD_W,
+  STD_H,
   extractBadgeColor,
   fitBadgeToCanvas,
   fitCompositeToCanvas,
@@ -13,10 +14,11 @@ import {
   BadgeRender,
   PosterComposite,
 } from "./poster-render-helpers"
+import { LAND_W, LAND_H } from "./image-utils"
 import { renderGenreBadge, renderRankingBadge, renderExtraBadge, renderQualityBadge, renderComingSoonRibbon, comingSoonRibbonLayout, renderSVG } from "./svg-badge"
 import { buildLogoScrim, logoContrast, logoInkLuminance, logoScrimStrength, posterLogoZoneLuminance } from "./logo-contrast"
 import { renderFirstMatchingNetworkLogoBadge, renderFirstMatchingNetworkRawBadge, renderFirstMatchingNetworkLogoBadgeHybrid, renderFirstMatchingNetworkRawBadgeHybrid, type NetworkCandidate } from "./network-svgs"
-import { computeLogoLayout } from "./logo-layout"
+import { computeLogoLayout, logoAlignPadX } from "./logo-layout"
 import fs from "fs"
 import path from "path"
 import { estimateTextWidth, fontFamilyFor } from "./badge-svg-shared"
@@ -160,36 +162,62 @@ export interface GenerationInput {
   /** Path sorgente del backdrop (cache image-level). Assente → niente cache. */
   backdropSrc?: string | null
   /**
+   * Allineamento orizzontale del blocco logo/metadati ("center" = classico,
+   * "left" = Cinematic). Default center (byte-identico al passato).
+   */
+  logoAlign?: "left" | "center"
+  /**
    * Effetto pre-digitale già risolto dalla route (flag `pre` ON + film
    * rilevato senza disponibilità digitale/streaming): velo scuro + badge
    * "Coming Soon". Solo film, indipendente dai toggle badges/ranking.
    */
   preRelease?: boolean
+  /**
+   * Formato canvas (prova orizzontale): "poster" (500×750, default) o
+   * "landscape" (768×432, base = backdrop TMDB). La route costruisce già
+   * `posterBuf` alle dimensioni giuste; qui CW/CH guidano solo overlay,
+   * badge e posizioni.
+   */
+  shape?: "poster" | "landscape"
 }
 
-// ---- Vignette SVG cache (constant, render once) ----
-let _vignettePromise: Promise<Buffer> | null = null
-async function getVignette(): Promise<Buffer> {
-  if (!_vignettePromise) {
-    _vignettePromise = sharp(Buffer.from(cinematicVignetteSVG(STD_W, STD_H))).png().toBuffer()
+// ---- Vignette SVG cache (una entry per dimensioni canvas) ----
+const _vignetteCache = new Map<string, Promise<Buffer>>()
+async function getVignette(canvasW: number = STD_W, canvasH: number = STD_H): Promise<Buffer> {
+  const key = `${canvasW}x${canvasH}`
+  let p = _vignetteCache.get(key)
+  if (!p) {
+    p = sharp(Buffer.from(cinematicVignetteSVG(canvasW, canvasH))).png().toBuffer()
+    _vignetteCache.set(key, p)
   }
-  return _vignettePromise
+  return p
 }
 
-// ---- Pre-release dim overlay (constant black veil, render once) ----
-let _preReleaseDimPromise: Promise<Buffer> | null = null
-async function getPreReleaseDim(): Promise<Buffer> {
-  if (!_preReleaseDimPromise) {
-    _preReleaseDimPromise = sharp({
+// ---- Landscape corner scrim (una entry: 768×432 costanti) ----
+let _landscapeScrimPromise: Promise<Buffer> | null = null
+async function getLandscapeScrim(): Promise<Buffer> {
+  if (!_landscapeScrimPromise) {
+    _landscapeScrimPromise = sharp(Buffer.from(cinematicCornerGradientSVG(LAND_W, LAND_H))).png().toBuffer()
+  }
+  return _landscapeScrimPromise
+}
+// ---- Pre-release dim overlay (uno per dimensioni canvas) ----
+const _preReleaseDimCache = new Map<string, Promise<Buffer>>()
+async function getPreReleaseDim(canvasW: number = STD_W, canvasH: number = STD_H): Promise<Buffer> {
+  const key = `${canvasW}x${canvasH}`
+  let p = _preReleaseDimCache.get(key)
+  if (!p) {
+    p = sharp({
       create: {
-        width: STD_W,
-        height: STD_H,
+        width: canvasW,
+        height: canvasH,
         channels: 4,
         background: { r: 0, g: 0, b: 0, alpha: PRE_RELEASE_DIM_ALPHA },
       },
     }).png().toBuffer()
+    _preReleaseDimCache.set(key, p)
   }
-  return _preReleaseDimPromise
+  return p
 }
 
 // ---------------------------------------------------------------------------
@@ -515,7 +543,28 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     posterSrc, logoSrc, backdropSrc,
     preRelease = false,
     logoScrimDisabled,
+    logoAlign,
+    shape,
   } = input
+
+  // Dimensioni canvas: portrait (default, byte-identico al passato) o
+  // landscape 16:9 (prova ?shape=landscape, base = backdrop TMDB).
+  const CW = shape === "landscape" ? LAND_W : STD_W
+  const CH = shape === "landscape" ? LAND_H : STD_H
+  // Allineamento blocco logo/metadati: in portrait è SEMPRE "center" per contratto.
+  // In landscape può essere "left" (Cinematic Left) o "center".
+  const align = shape === "landscape" && logoAlign === "left" ? "left" : "center"
+  const isLandscapeLeft = shape === "landscape" && align === "left"
+  // I badge si rendono alla larghezza portrait (stessi pixel assoluti del
+  // verticale): sul canvas 16:9 non devono dominare la scena. Posizioni,
+  // overflow-protection e chiavi cache restano sul canvas vero (CW/CH):
+  // le chiavi in particolare NON usano badgePw, altrimenti i bitmap
+  // portrait (stesso pw=500) colliderebbero — fatale per gli stili `bar`
+  // full-width.
+  const badgePw = shape === "landscape" ? STD_W : CW
+  // Il badge superiore centrale (rank/extra) in landscape è reso al 120%:
+  // sul canvas 16:9 deve restare il protagonista in alto.
+  const topBadgePw = shape === "landscape" ? Math.round(badgePw * 1.2) : badgePw
 
   // -----------------------------------------------------------------------
   // 1. Backdrop composite layer
@@ -527,12 +576,12 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     const bw = bMeta.width
     const bh = bMeta.height
     const bScale = backdropScale / 100
-    let bResizedW = Math.round(STD_W * bScale)
+    let bResizedW = Math.round(CW * bScale)
     let bResizedH = Math.round(bh * (bResizedW / bw))
-    if (bResizedW > STD_W) { bResizedH = Math.round(bResizedH * (STD_W / bResizedW)); bResizedW = STD_W }
-    if (bResizedH > STD_H) { bResizedW = Math.round(bResizedW * (STD_H / bResizedH)); bResizedH = STD_H }
-    const bX = Math.round((STD_W - bResizedW) / 2 + backdropOffsetX)
-    const bY = Math.round((STD_H - bResizedH) / 2 + backdropOffsetY)
+    if (bResizedW > CW) { bResizedH = Math.round(bResizedH * (CW / bResizedW)); bResizedW = CW }
+    if (bResizedH > CH) { bResizedW = Math.round(bResizedW * (CH / bResizedH)); bResizedH = CH }
+    const bX = Math.round((CW - bResizedW) / 2 + backdropOffsetX)
+    const bY = Math.round((CH - bResizedH) / 2 + backdropOffsetY)
     const backdropResized = await resizeBackdropCached(backdropFetch, bResizedW, bResizedH, backdropSrc)
     composites.push({ input: backdropResized.input, top: bY, left: bX })
   }
@@ -549,7 +598,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     && ((genreAvailable && badgeGenre) || (ratingAvailable && badgeRating) || (yearAvailable && badgeYear))
 
   const [blurOverlay, badgeColors, logoResult] = await Promise.all([
-    applyBlur({ posterBuf, blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness }),
+    applyBlur({ posterBuf, blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, canvasW: CW, canvasH: CH }),
     hasGenreBadge
       ? (accentOverride
           ? Promise.resolve(accentOverride)
@@ -565,9 +614,15 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
           const uOx = logoOffsetX ?? 0
           const uOy = logoOffsetY ?? 0
           const layout = computeLogoLayout({
-            posterW: STD_W, posterH: STD_H, logoW: lw, logoH: lh,
+            posterW: CW, posterH: CH, logoW: lw, logoH: lh,
             logoScale: uScale, logoOffsetX: uOx, logoOffsetY: uOy,
             hasBadges: hasGenreBadge,
+            align,
+            // Landscape 16:9: logo contenuto (max 40% larghezza, max 24%
+            // altezza — i loghi quadrati/multilinea non devono mangiarsi
+            // la scena) e sollevato sopra la fascia del badge genere
+            // (margine 25% invece di 10%) con calibrazione +55px su Y per compattezza.
+            ...(shape === "landscape" ? { maxWidthPct: 40, maxHeightPct: 24, bottomMarginPct: 25, topOffset: 55 } : {}),
           })
           const resized = await resizeLogoCached(logoFetch, layout.width, layout.height, logoSrc)
           const aW = resized.w
@@ -580,12 +635,17 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // -----------------------------------------------------------------------
   // 3. Vignette + logo (il blur resta un overlay grezzo, composto nel passo 7)
   // -----------------------------------------------------------------------
-  const vigBuf = await getVignette()
+  const vigBuf = await getVignette(CW, CH)
   composites.push({ input: vigBuf, top: 0, left: 0 })
+  // Cinematic Left: scrim d'angolo per la leggibilità del blocco a sinistra
+  // (si somma alla fascia blur bassa, che resta controllata dall'utente).
+  if (isLandscapeLeft) {
+    composites.push({ input: await getLandscapeScrim(), top: 0, left: 0 })
+  }
   // Velo pre-digitale: sopra poster/vignetta ma sotto logo e badge (restano
   // luminosi e leggibili). Costante cachata, nessun cambio di output a flag spento.
   if (preRelease) {
-    composites.push({ input: await getPreReleaseDim(), top: 0, left: 0 })
+    composites.push({ input: await getPreReleaseDim(CW, CH), top: 0, left: 0 })
   }
   if (logoResult) {
     // Rete di sicurezza per la leggibilità: quando il logo e la fascia di poster
@@ -601,7 +661,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       ])
       const strength = logoScrimStrength(logoContrast(inkLum, zoneLum))
       if (strength <= 0) return null
-      const png = await buildLogoScrim(logoResult.w, logoResult.h, strength, (inkLum ?? 0) > 0.5, STD_W, STD_H)
+      const png = await buildLogoScrim(logoResult.w, logoResult.h, strength, (inkLum ?? 0) > 0.5, CW, CH)
       if (!png) return null
       const meta = await sharp(png).metadata()
       const sw = meta.width ?? 0
@@ -610,8 +670,8 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       // esce dalla tela, quindi la posizione si blocca dentro i bordi.
       return {
         input: png,
-        top: Math.min(Math.max(0, Math.round(logoResult.top + logoResult.h / 2 - sh / 2)), Math.max(0, STD_H - sh)),
-        left: Math.min(Math.max(0, Math.round(logoResult.left + logoResult.w / 2 - sw / 2)), Math.max(0, STD_W - sw)),
+        top: Math.min(Math.max(0, Math.round(logoResult.top + logoResult.h / 2 - sh / 2)), Math.max(0, CH - sh)),
+        left: Math.min(Math.max(0, Math.round(logoResult.left + logoResult.w / 2 - sw / 2)), Math.max(0, CW - sw)),
       }
     })().catch(() => null)
     if (scrim) composites.push(scrim)
@@ -675,7 +735,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   }
   const showComingSoon = !!preRelease && !queryExtra
     && topBadge?.type === "extra" && topBadge.label === comingSoonLabel
-  const ribbonLayout = showComingSoon ? comingSoonRibbonLayout(STD_W) : null
+  const ribbonLayout = showComingSoon ? comingSoonRibbonLayout(badgePw) : null
 
   // Network logo (parallel with badge render) — SVG first, TMDB fallback
   const netLogoEnabled = networkLogo ?? (qNetLogo !== null ? qNetLogo !== "0" : (sd.networkLogo !== false && (mapping?.networkLogo ?? true) !== false))
@@ -710,11 +770,11 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   const [pillLogoResult, rawLogoResult] = netLogoEnabled
     ? await Promise.all([
         hasDetailed
-          ? renderFirstMatchingNetworkLogoBadgeHybrid(networkCandidatesHybrid as NetworkCandidate[], STD_W, topLight)
-          : renderFirstMatchingNetworkLogoBadge(stringCandidates, STD_W, topLight),
+          ? renderFirstMatchingNetworkLogoBadgeHybrid(networkCandidatesHybrid as NetworkCandidate[], badgePw, topLight)
+          : renderFirstMatchingNetworkLogoBadge(stringCandidates, badgePw, topLight),
         hasDetailed
-          ? renderFirstMatchingNetworkRawBadgeHybrid(networkCandidatesHybrid as NetworkCandidate[], STD_W, topLight)
-          : renderFirstMatchingNetworkRawBadge(stringCandidates, STD_W),
+          ? renderFirstMatchingNetworkRawBadgeHybrid(networkCandidatesHybrid as NetworkCandidate[], badgePw, topLight)
+          : renderFirstMatchingNetworkRawBadge(stringCandidates, badgePw),
       ])
     : [null, null]
   const networkLogoResult = pillLogoResult
@@ -739,23 +799,23 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   const hasQualityBadge = badgeQuality !== false && !!quality
 
   const genreBadgeKey = hasGenreBadge
-    ? badgeCacheKey("genre", genreName, voteAverage, STD_W, year, badgeStyle, accentColorGenre, topLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
+    ? badgeCacheKey("genre", genreName, voteAverage, CW, year, badgeStyle, accentColorGenre, topLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
     : null
   const rankBadgeKey = !showComingSoon && topBadge
-    ? badgeCacheKey("rank", topBadge.type === "extra" ? topBadge.label : `${(topBadge as { rank: number }).rank}:${topBadge!.label}`, STD_W, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, topBadgeScale)
+    ? badgeCacheKey("rank", topBadge.type === "extra" ? topBadge.label : `${(topBadge as { rank: number }).rank}:${topBadge!.label}`, CW, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, topBadgeScale)
     : null
   const qualityBadgeKey = hasQualityBadge
-    ? badgeCacheKey("quality", quality, STD_W, topLight, qualityBadgeScale)
+    ? badgeCacheKey("quality", quality, CW, topLight, qualityBadgeScale)
     : null
   const comingSoonKey = showComingSoon
-    ? badgeCacheKey("comingsoon", comingSoonLabel, STD_W, topLight, ribbonSide)
+    ? badgeCacheKey("comingsoon", comingSoonLabel, CW, topLight, ribbonSide)
     : null
 
   const [genreBadgeResult, rankBadgeResult, qualityBadgeResult, comingSoonResult] = await Promise.all([
     genreBadgeKey
       ? (cacheGet<{ png: Buffer; w: number; h: number }>(genreBadgeKey)
           || coalesceBadgeRender(genreBadgeKey, () =>
-              renderGenreBadge(genreName ?? "", voteAverage ?? 0, STD_W, year, badgeStyle, accentColorGenre, topLight, { showGenre: badgeGenre, showYear: badgeYear, showRating: badgeRating }, badgeStyle === "bar" ? genreBadgeScale : 100)
+              renderGenreBadge(genreName ?? "", voteAverage ?? 0, badgePw, year, badgeStyle, accentColorGenre, topLight, { showGenre: badgeGenre, showYear: badgeYear, showRating: badgeRating }, badgeStyle === "bar" ? genreBadgeScale : 100)
                 .then((r) => { if (r) cacheSet(genreBadgeKey, r, ["badge"], BADGE_CACHE_TTL); return r })
             ))
       : Promise.resolve(null),
@@ -763,24 +823,24 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       ? (cacheGet<{ png: Buffer; w: number; h: number; isRank?: boolean }>(rankBadgeKey)
           || coalesceBadgeRender(rankBadgeKey, () => {
               if (topBadge!.type === "extra") {
-                return renderExtraBadge(topBadge!.label, STD_W, topLight, rankingBadgeStyle, accentColorRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
+                return renderExtraBadge(topBadge!.label, topBadgePw, topLight, rankingBadgeStyle, accentColorRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
                   .then((r) => { const v = { ...r, isRank: false }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
               }
-              return renderRankingBadge((topBadge as { rank: number }).rank, STD_W, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
+              return renderRankingBadge((topBadge as { rank: number }).rank, rankingBadgeStyle === "netflix" ? badgePw : topBadgePw, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
                 .then((r) => { const v = { ...r, isRank: true }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
             }))
       : Promise.resolve(null),
     qualityBadgeKey
       ? (cacheGet<{ png: Buffer; w: number; h: number }>(qualityBadgeKey)
           || coalesceBadgeRender(qualityBadgeKey, () =>
-              renderQualityBadge(quality!, STD_W, topLight)
+              renderQualityBadge(quality!, badgePw, topLight)
                 .then((r) => { if (r) cacheSet(qualityBadgeKey, r, ["badge"], BADGE_CACHE_TTL); return r })
             ))
       : Promise.resolve(null),
     comingSoonKey
       ? (cacheGet<{ png: Buffer; w: number; h: number }>(comingSoonKey)
           || coalesceBadgeRender(comingSoonKey, () =>
-              renderComingSoonRibbon(comingSoonLabel, STD_W, ribbonSide === "right" ? "right" : "left")
+              renderComingSoonRibbon(comingSoonLabel, badgePw, ribbonSide === "right" ? "right" : "left")
                 .then((r) => { if (r) cacheSet(comingSoonKey, r, ["badge"], BADGE_CACHE_TTL); return r })
             ))
       : Promise.resolve(null),
@@ -797,9 +857,29 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // Tutta la matematica di posizione/overlap sotto usa già le dimensioni
   // scalate. La posizione del badge genere usa safeGenreBadgeResult.h.
   const [rankBadgeForLayout, genreBadgeForLayout, qualityBadgeForLayout, networkLogoForLayout] = await Promise.all([
-    rankBadgeResult && topBadgeScale !== 100 && rankingBadgeStyle !== "bar"
-      ? scaleBitmapForLayout(rankBadgeResult, topBadgeScale)
-      : Promise.resolve(rankBadgeResult),
+    rankBadgeResult
+      ? (async () => {
+          // Landscape: scala % + riduzione -20px in UN solo resize (prima due
+          // resize sharp in serie sullo stesso bitmap). Stesse dimensioni
+          // finali del vecchio codice (la scala % salta lo stile bar, lo
+          // shrink -20px no), un solo passaggio di ricampionamento.
+          if (shape === "landscape") {
+            const isBar = rankingBadgeStyle === "bar"
+            const scaledH = isBar ? rankBadgeResult.h : Math.max(1, Math.round(rankBadgeResult.h * topBadgeScale / 100))
+            const scaledW = isBar ? rankBadgeResult.w : Math.max(1, Math.round(rankBadgeResult.w * topBadgeScale / 100))
+            const targetH = Math.max(1, scaledH - 20)
+            const targetW = Math.max(1, Math.round(scaledW * (targetH / scaledH)))
+            if (targetH !== rankBadgeResult.h || targetW !== rankBadgeResult.w) {
+              const png = await sharp(rankBadgeResult.png).resize(targetW, targetH).toBuffer()
+              return { ...rankBadgeResult, png, w: targetW, h: targetH }
+            }
+            return rankBadgeResult
+          }
+          return topBadgeScale !== 100 && rankingBadgeStyle !== "bar"
+            ? await scaleBitmapForLayout(rankBadgeResult, topBadgeScale)
+            : rankBadgeResult
+        })()
+      : Promise.resolve(null),
     genreBadgeResult && genreBadgeScale !== 100 && badgeStyle !== "bar"
       ? scaleBitmapForLayout(genreBadgeResult, genreBadgeScale)
       : Promise.resolve(genreBadgeResult),
@@ -811,30 +891,41 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       : Promise.resolve(networkRawResult),
   ])
   const [safeGenreBadgeResult, safeRankBadgeResult, safeQualityBadgeResult, safeComingSoonResult] = await Promise.all([
-    genreBadgeForLayout ? fitBadgeToCanvas(genreBadgeForLayout, STD_W, STD_H) : Promise.resolve(null),
-    rankBadgeForLayout ? fitBadgeToCanvas(rankBadgeForLayout, STD_W, STD_H) : Promise.resolve(null),
-    qualityBadgeForLayout ? fitBadgeToCanvas(qualityBadgeForLayout, STD_W, STD_H) : Promise.resolve(null),
-    comingSoonResult ? fitBadgeToCanvas(comingSoonResult, STD_W, STD_H) : Promise.resolve(null),
+    genreBadgeForLayout ? fitBadgeToCanvas(genreBadgeForLayout, CW, CH) : Promise.resolve(null),
+    rankBadgeForLayout ? fitBadgeToCanvas(rankBadgeForLayout, CW, CH) : Promise.resolve(null),
+    qualityBadgeForLayout ? fitBadgeToCanvas(qualityBadgeForLayout, CW, CH) : Promise.resolve(null),
+    comingSoonResult ? fitBadgeToCanvas(comingSoonResult, CW, CH) : Promise.resolve(null),
   ])
 
   if (safeGenreBadgeResult) {
+    const landscapeShiftX = shape === "landscape" ? -55 : 0
     if (badgeStyle === "bar") {
-      composites.push({ input: safeGenreBadgeResult.png, top: STD_H - safeGenreBadgeResult.h, left: 0 })
+      // In landscape la barra è resa a badgePw (non full-width): centrata
+      // come lower-third invece che ancorata a sinistra — ma in Cinematic
+      // Left segue il logo a sinistra.
+      const barLeft = (isLandscapeLeft
+        ? logoAlignPadX(CW) + genreBadgeOffsetX
+        : shape === "landscape" ? Math.round((CW - safeGenreBadgeResult.w) / 2) : 0) + landscapeShiftX
+      composites.push({ input: safeGenreBadgeResult.png, top: CH - safeGenreBadgeResult.h, left: barLeft })
     } else {
       // Offset solo stili centrati: la barra resta ancorata full-width.
-      const badgeY = STD_H - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY
-      composites.push({ input: safeGenreBadgeResult.png, top: badgeY, left: Math.round((STD_W - safeGenreBadgeResult.w) / 2) + genreBadgeOffsetX })
+      // In Cinematic Left la riga metadati sta sotto il logo a sinistra.
+      const badgeY = CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY
+      const badgeLeft = (isLandscapeLeft
+        ? logoAlignPadX(CW) + genreBadgeOffsetX
+        : Math.round((CW - safeGenreBadgeResult.w) / 2) + genreBadgeOffsetX) + landscapeShiftX
+      composites.push({ input: safeGenreBadgeResult.png, top: badgeY, left: badgeLeft })
     }
   }
   if (input.ratings?.length) {
     // Optional enrichment must never prevent the original poster from rendering.
-    const row = await renderMultiRatings(input.ratings, STD_W - 40, topLight).catch(() => null)
+    const row = await renderMultiRatings(input.ratings, CW - 40, topLight).catch(() => null)
     if (row) {
       const legacyTop = safeGenreBadgeResult
-        ? (badgeStyle === "bar" ? STD_H - safeGenreBadgeResult.h
-          : STD_H - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY)
-        : STD_H - 20
-      composites.push({ input: row.png, left: Math.round((STD_W - row.w) / 2), top: Math.max(0, legacyTop - row.h - 10) })
+        ? (badgeStyle === "bar" ? CH - safeGenreBadgeResult.h
+          : CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY)
+        : CH - 20
+      composites.push({ input: row.png, left: Math.round((CW - row.w) / 2), top: Math.max(0, legacyTop - row.h - 10) })
     }
   }
   const isRightRibbon = ribbonSide === "right"
@@ -853,15 +944,17 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     const isCentered = !isBar && !isNetflixRibbon
     let left: number
     if (isBar) {
-      left = 0 // bar full-width: resta ancorata a sinistra
+      // Bar full-width in portrait; in landscape è resa a badgePw e va
+      // centrata (stesso lower-third del badge genere).
+      left = shape === "landscape" ? Math.round((CW - safeRankBadgeResult.w) / 2) : 0
     } else if (isNetflixRibbon && isRightRibbon) {
-      left = Math.round(STD_W - safeRankBadgeResult.w) // nastro Netflix a destra (Stremio)
+      left = Math.round(CW - safeRankBadgeResult.w) // nastro Netflix a destra (Stremio)
     } else if (isNetflixRibbon) {
       left = 0 // nastro Netflix a sinistra (Nuvio, default)
     } else {
       // Badge grande al centro, dimensione invariata: in caso di sovrapposizione
       // si rimpiccioliscono i badge laterali (network top-left, qualità top-right).
-      left = Math.round((STD_W - safeRankBadgeResult.w) / 2) + topBadgeOffsetX
+      left = Math.round((CW - safeRankBadgeResult.w) / 2) + topBadgeOffsetX
     }
     finalRankBadge = safeRankBadgeResult
     finalRankLeft = left
@@ -883,7 +976,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     composites.push({
       input: safeComingSoonResult.png,
       top: -ribbonLayout.offset,
-      left: ribbonSide === "right" ? Math.round(STD_W - safeComingSoonResult.w + ribbonLayout.offset) : -ribbonLayout.offset,
+      left: ribbonSide === "right" ? Math.round(CW - safeComingSoonResult.w + ribbonLayout.offset) : -ribbonLayout.offset,
     })
   }
   // Network: in alto a sinistra di default; centrato sopra il logo film SOLO
@@ -892,15 +985,15 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // netTopLeftBottom traccia il fondo del logo network quando occupa il top-left (per qualità Stremio sotto).
   let netTopLeftBottom: number | null = null
   if (networkLogoForLayout) {
-    const gap = Math.round(6 * STD_H / 570)
-    let fittedRaw = await fitBadgeToCanvas(networkLogoForLayout, STD_W, STD_H)
+    const gap = Math.round(6 * CH / 570)
+    let fittedRaw = await fitBadgeToCanvas(networkLogoForLayout, CW, CH)
     if (fittedRaw) {
       let top: number
       let left: number
       const isNetflixRibbon = rankingBadgeStyle === "netflix" && topBadge?.type === "rank"
       const hasComingSoonCorner = showComingSoon && !!ribbonLayout && !!safeComingSoonResult
-      const netPadX = Math.round(18 * STD_W / 380)
-      const netPadY = Math.round(18 * STD_H / 570)
+      const netPadX = Math.round(18 * CW / 380)
+      const netPadY = Math.round(18 * CH / 570)
 
       // Il badge centrale resta invariato: se si sovrappone al network,
       // rimpicciolisce il network (fino a 0.55x). B2: la scala finale è
@@ -938,8 +1031,9 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
 
       if (logoResult && (isNetflixRibbon || hasComingSoonCorner)) {
         // Con logo film + nastro Netflix o Coming Soon: subito sopra il logo film
+        // (in Cinematic Left allineato a sinistra come sopratitolo, non centrato).
         top = Math.max(0, logoResult.top - fittedRaw.h - gap)
-        left = Math.round((STD_W - fittedRaw.w) / 2)
+        left = isLandscapeLeft ? logoResult.left : Math.round((CW - fittedRaw.w) / 2)
       } else if (!isNetflixRibbon && !logoResult) {
         // Senza logo film e senza nastro Netflix: in alto a sinistra;
         // con il nastro Coming Soon impilato sotto di esso (stesso angolo).
@@ -967,7 +1061,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
           const overlapY = top < finalRankTop + finalRankBadge!.h + 4 && netBottom > finalRankTop - 4
           if (overlapX && overlapY) {
             left = Math.round(ribbonRight + 10)
-            const maxLeft = STD_W - fittedRaw.w - netPadX
+            const maxLeft = CW - fittedRaw.w - netPadX
             if (left > maxLeft) left = maxLeft
           }
         }
@@ -989,21 +1083,21 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // Il badge centrale resta invariato: se si sovrappone alla qualità,
   // rimpicciolisce la qualità (fino a 0.55x).
   if (safeQualityBadgeResult) {
-    const netBaseTop = Math.round(18 * STD_H / 570)
-    const netPadX = Math.round(18 * STD_W / 380)
+    const netBaseTop = Math.round(18 * CH / 570)
+    const netPadX = Math.round(18 * CW / 380)
     const isNetflixRight = rankingBadgeStyle === "netflix" && ribbonSide === "right" && topBadge?.type === "rank"
     const isComingSoonRight = showComingSoon && ribbonSide === "right" && !!ribbonLayout
     const isRightRibbonCorner = (isNetflixRight && !!finalRankBadge) || isComingSoonRight
 
     let top = netBaseTop
-    let left = isRightRibbonCorner ? netPadX : Math.round(STD_W - safeQualityBadgeResult.w - netPadX)
+    let left = isRightRibbonCorner ? netPadX : Math.round(CW - safeQualityBadgeResult.w - netPadX)
     let finalQualityBadge = safeQualityBadgeResult
 
     if (isRightRibbonCorner) {
       // Nastro a destra (Netflix o Coming Soon): qualità a sinistra, speculare
       // all'angolo destro standard — impilata sotto il logo network se presente.
       if (netTopLeftBottom !== null) {
-        top = netTopLeftBottom + Math.round(6 * STD_H / 570)
+        top = netTopLeftBottom + Math.round(6 * CH / 570)
       }
     }
 
@@ -1029,7 +1123,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
           curW = newW
           curH = newH
           curPng = await sharp(safeQualityBadgeResult.png).resize(newW, newH).toBuffer()
-          curLeft = isRightRibbonCorner ? netPadX : Math.round(STD_W - curW - netPadX)
+          curLeft = isRightRibbonCorner ? netPadX : Math.round(CW - curW - netPadX)
           if (scale <= minScale) break
         }
         finalQualityBadge = { ...finalQualityBadge, png: curPng, w: curW, h: curH }
@@ -1052,7 +1146,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // -----------------------------------------------------------------------
   // 7. Final composite
   // -----------------------------------------------------------------------
-  const safeComposites = (await Promise.all(composites.map((layer) => fitCompositeToCanvas(layer, STD_W, STD_H))))
+  const safeComposites = (await Promise.all(composites.map((layer) => fitCompositeToCanvas(layer, CW, CH))))
     .filter((layer): layer is PosterComposite => layer !== null)
 
   // Il blur è un overlay RGBA grezzo (nessun PNG intermedio): entra come primo
@@ -1061,7 +1155,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // composite finale → 1 decode + 1 encode totali invece del roundtrip PNG
   // blur→modulate (che ri-decodava il PNG del blur a ogni render).
   const layers: Array<PosterComposite | { input: Buffer; raw: { width: number; height: number; channels: 4 }; top: number; left: number }> = blurOverlay
-    ? [{ input: blurOverlay.overlay, raw: { width: STD_W, height: blurOverlay.height, channels: 4 }, top: blurOverlay.top, left: 0 }, ...safeComposites]
+    ? [{ input: blurOverlay.overlay, raw: { width: CW, height: blurOverlay.height, channels: 4 }, top: blurOverlay.top, left: 0 }, ...safeComposites]
     : safeComposites
 
   let pipeline = sharp(posterBuf)

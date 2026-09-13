@@ -6,6 +6,11 @@ export interface EffectiveRotationState {
   readonly isRotating: boolean
 }
 
+export interface EffectiveBackdropRotationState {
+  readonly availableBackdrops: readonly string[]
+  readonly isRotating: boolean
+}
+
 export function getEffectiveRotationState(mapping: Mapping | null): EffectiveRotationState {
   if (!mapping?.autoRotateClean || !mapping.cleanPosters || mapping.cleanPosters.length < 2) {
     return { availablePosters: [], isRotating: false }
@@ -16,6 +21,23 @@ export function getEffectiveRotationState(mapping: Mapping | null): EffectiveRot
   return {
     availablePosters,
     isRotating: availablePosters.length >= 2,
+  }
+}
+
+/**
+ * Stato di rotazione degli sfondi landscape (mirror dei poster verticali):
+ * richiede autoRotateBackdrop + almeno 2 backdrop non esclusi.
+ */
+export function getEffectiveBackdropRotationState(mapping: Mapping | null): EffectiveBackdropRotationState {
+  if (!mapping?.autoRotateBackdrop || !mapping.cleanBackdrops || mapping.cleanBackdrops.length < 2) {
+    return { availableBackdrops: [], isRotating: false }
+  }
+
+  const excludedSet = new Set(mapping.excludedBackdrops || [])
+  const availableBackdrops = mapping.cleanBackdrops.filter((path) => !excludedSet.has(path))
+  return {
+    availableBackdrops,
+    isRotating: availableBackdrops.length >= 2,
   }
 }
 
@@ -95,6 +117,58 @@ export async function tryRotatePoster(
     currentMapping.posterPath = newPosterPath
     currentMapping.cleanPosterIndex = newIndex
     currentMapping.cleanPosterUpdatedAt = new Date(now).toISOString()
+    currentMapping.updatedAt = new Date(now).toISOString()
+    await upsert(currentMapping)
+    return currentMapping
+  })
+}
+
+/**
+ * Rotazione 24h dello sfondo landscape (mirror di tryRotatePoster): avanza
+ * `backdropPath` tra i backdrop disponibili. Stessa riga mapping dei poster,
+ * quindi stesso lock per-id (niente race tra le due rotazioni).
+ * Ritorna il mapping aggiornato o null se non serve ruotare.
+ */
+export async function tryRotateBackdrop(
+  mapping: Mapping,
+  rotationState: EffectiveBackdropRotationState,
+): Promise<Mapping | null> {
+  if (!rotationState.isRotating || rotationState.availableBackdrops.length < 2) {
+    return null
+  }
+
+  const key = `${mapping.mediaType}:${mapping.tmdbId}`
+  return withRotationLock(key, async () => {
+    const { getById } = await import("@/lib/store")
+    const currentMapping = await getById(mapping.mediaType, mapping.tmdbId)
+    if (!currentMapping) return null
+
+    const lastUpdate = currentMapping.cleanBackdropUpdatedAt
+      ? new Date(currentMapping.cleanBackdropUpdatedAt).getTime() : 0
+    const now = Date.now()
+    if (now - lastUpdate <= 24 * 60 * 60 * 1000) {
+      return null
+    }
+
+    const excludedSet = new Set(currentMapping.excludedBackdrops || [])
+    const currentAvailable = (currentMapping.cleanBackdrops || [])
+      .filter((path) => !excludedSet.has(path))
+    if (currentAvailable.length < 2) return null
+
+    const currentIdx = currentMapping.cleanBackdropIndex ?? -1
+    const newIndex = currentIdx < 0 ? 0 : (currentIdx + 1) % currentAvailable.length
+    const newBackdropPath = currentAvailable[newIndex]
+
+    if (newBackdropPath === currentMapping.backdropPath) {
+      currentMapping.cleanBackdropUpdatedAt = new Date(now).toISOString()
+      currentMapping.updatedAt = new Date(now).toISOString()
+      await upsert(currentMapping)
+      return null
+    }
+
+    currentMapping.backdropPath = newBackdropPath
+    currentMapping.cleanBackdropIndex = newIndex
+    currentMapping.cleanBackdropUpdatedAt = new Date(now).toISOString()
     currentMapping.updatedAt = new Date(now).toISOString()
     await upsert(currentMapping)
     return currentMapping

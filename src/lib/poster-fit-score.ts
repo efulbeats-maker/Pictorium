@@ -2,7 +2,8 @@ import sharp from "sharp"
 import { computeLogoLayout } from "@/lib/logo-layout"
 import { createLogger } from "@/lib/logger"
 // Batch B: import shared utilities from image-utils.ts (single source of truth)
-import { STD_W, STD_H, clamp, luma, type RgbData, decodePosterRaw, sliceRgb } from "@/lib/image-utils"
+import { STD_W, STD_H, LAND_W, LAND_H, clamp, luma, type RgbData, decodePosterRaw, sliceRgb } from "@/lib/image-utils"
+import type { PosterShape } from "@/lib/types"
 
 const log = createLogger("poster-fit-score")
 
@@ -53,6 +54,9 @@ export interface PosterFitInput {
   logoOffsetY: number
   hasBadges: boolean
   offsetYVariants?: number[]
+  /** Formato canvas: "landscape" analizza a 768×432 con layout Cinematic
+   *  Left (stessi vincoli di poster-service.ts). Default "poster". */
+  shape?: PosterShape
   /** Valori derivati dal logo, pre-calcolati una volta per run da
    *  `rankPostersByFit`. Quando assenti (path test) vengono calcolati
    *  internamente. */
@@ -84,13 +88,25 @@ export interface PosterFitResult {
   score: number
   metrics: PosterFitMetrics
   reasons: string[]
-  /** Poster già decodificato (raw RGB a STD_W×STD_H) durante lo scoring:
+  /** Poster già decodificato (raw RGB alle dimensioni canvas) durante lo scoring:
    *  `adjustFitResults` lo riusa per la text penalty senza ri-decodificare. */
   posterRaw?: RgbData
-  /** Posizione del box logo (STD_W×STD_H) calcolata durante lo scoring:
+  /** Posizione del box logo (coordinate canvas) calcolata durante lo scoring:
    *  `adjustFitResults` ci limita la text penalty alla zona dove il logo
    *  atterrerà davvero, invece della striscia fissa globale. */
   logoZone?: { left: number; top: number; width: number; height: number }
+}
+
+/** Dimensioni canvas di analisi per formato (stessi canvas del render). */
+export function fitCanvasSize(shape?: PosterShape): { width: number; height: number } {
+  return shape === "landscape" ? { width: LAND_W, height: LAND_H } : { width: STD_W, height: STD_H }
+}
+
+/** Vincoli di layout logo per formato (identici a poster-service.ts). */
+function logoLayoutOverrides(shape?: PosterShape): { align: "left" | "center"; maxWidthPct?: number; maxHeightPct?: number; bottomMarginPct?: number; topOffset?: number } {
+  return shape === "landscape"
+    ? { align: "left", maxWidthPct: 40, maxHeightPct: 24, bottomMarginPct: 25, topOffset: 55 }
+    : { align: "center" }
 }
 
 function analyzeLuma(rgb: RgbData): { mean: number; stdDev: number; edgeAvg: number; meanR: number; meanG: number; meanB: number } {
@@ -318,20 +334,23 @@ async function buildLogoFitContext(
   logoOffsetX: number,
   logoOffsetY: number,
   hasBadges: boolean,
+  shape?: PosterShape,
 ): Promise<LogoFitContext> {
   const logoMeta = await sharp(logoBuffer).metadata()
   const logoW = logoMeta.width ?? 100
   const logoH = logoMeta.height ?? 100
   const logoLuma = await logoAvgLuma(logoBuffer)
+  const canvas = fitCanvasSize(shape)
   const baseLayout = computeLogoLayout({
-    posterW: STD_W,
-    posterH: STD_H,
+    posterW: canvas.width,
+    posterH: canvas.height,
     logoW,
     logoH,
     logoScale,
     logoOffsetX,
     logoOffsetY,
     hasBadges,
+    ...logoLayoutOverrides(shape),
   })
   // Mask dell'inchiostro alla stessa risoluzione/posizione della composizione
   // reale (poster-service.ts usa fit:"inside" + centratura nel box).
@@ -356,13 +375,14 @@ async function buildLogoFitContext(
 }
 
 export async function scorePosterLogoFit(input: PosterFitInput): Promise<PosterFitResult> {
-  const { posterBuffer, logoBuffer, posterPath, logoScale, logoOffsetX, logoOffsetY, hasBadges, offsetYVariants, context } = input
-  const ctx = context ?? await buildLogoFitContext(logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges)
+  const { posterBuffer, logoBuffer, posterPath, logoScale, logoOffsetX, logoOffsetY, hasBadges, offsetYVariants, shape, context } = input
+  const ctx = context ?? await buildLogoFitContext(logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges, shape)
   const { logoW, logoH, logoLuma, baseLayout, logoMask, maskLeft, maskTop } = ctx
+  const canvas = fitCanvasSize(shape)
 
-  // Decode-once: raw RGB a STD_W×STD_H riusato da tutte le analisi (safety,
+  // Decode-once: raw RGB alle dimensioni canvas riusato da tutte le analisi (safety,
   // pelle, badge, varianti) via slice in JS — niente ri-decode sharp per regione.
-  const posterRaw = await decodePosterRaw(posterBuffer)
+  const posterRaw = await decodePosterRaw(posterBuffer, canvas.width, canvas.height)
 
   const padding = 24
   const analysisBox = {
@@ -459,10 +479,10 @@ export async function scorePosterLogoFit(input: PosterFitInput): Promise<PosterF
 
   // Skin-tone detection in bottom 30%
   if (safetyArea) {
-    const skinZoneTop = Math.round(STD_H * 0.65)
-    const skinZoneH = STD_H - skinZoneTop
+    const skinZoneTop = Math.round(canvas.height * 0.65)
+    const skinZoneH = canvas.height - skinZoneTop
     if (skinZoneH > 0) {
-      const skinData = sliceRgb(posterRaw, 0, skinZoneTop, STD_W, skinZoneH)
+      const skinData = sliceRgb(posterRaw, 0, skinZoneTop, canvas.width, skinZoneH)
       if (skinData) {
         let skinPixelCount = 0
         let skinZonePixels = 0
@@ -480,7 +500,7 @@ export async function scorePosterLogoFit(input: PosterFitInput): Promise<PosterF
           const logoBottom = baseLayout.top + baseLayout.height
           const logoTop = baseLayout.top
           const overlapTop = Math.max(logoTop, skinZoneTop)
-          const overlapBottom = Math.min(logoBottom, STD_H)
+          const overlapBottom = Math.min(logoBottom, canvas.height)
           const overlapH = Math.max(0, overlapBottom - overlapTop)
           if (overlapH > 0) {
             const overlapRatio = overlapH / skinZoneH
@@ -494,10 +514,10 @@ export async function scorePosterLogoFit(input: PosterFitInput): Promise<PosterF
   }
 
   if (hasBadges) {
-    const badgeTop = Math.round(STD_H * 0.82)
-    const badgeHeight = Math.round(STD_H * 0.16)
+    const badgeTop = Math.round(canvas.height * 0.82)
+    const badgeHeight = Math.round(canvas.height * 0.16)
     if (badgeHeight > 0) {
-      const badgeArea = sliceRgb(posterRaw, 0, badgeTop, STD_W, badgeHeight)
+      const badgeArea = sliceRgb(posterRaw, 0, badgeTop, canvas.width, badgeHeight)
       if (badgeArea) {
         const badgeAnalysis = analyzeLuma(badgeArea)
         badgeReadability = 1 - clamp(badgeAnalysis.stdDev / 90, 0, 1)
@@ -527,9 +547,10 @@ export async function scorePosterLogoFit(input: PosterFitInput): Promise<PosterF
     for (const oyVariant of variants) {
       if (oyVariant === logoOffsetY) continue
       const variantLayout = computeLogoLayout({
-        posterW: STD_W, posterH: STD_H, logoW, logoH,
+        posterW: canvas.width, posterH: canvas.height, logoW, logoH,
         logoScale, logoOffsetX, logoOffsetY: oyVariant,
         hasBadges,
+        ...logoLayoutOverrides(shape),
       })
       const variantBox = {
         left: variantLayout.left - padding,
@@ -574,8 +595,9 @@ export async function rankPostersByFit(
   logoOffsetY: number,
   hasBadges: boolean,
   offsetYVariants?: number[],
+  shape?: PosterShape,
 ): Promise<PosterFitResult[]> {
-  const context = await buildLogoFitContext(logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges)
+  const context = await buildLogoFitContext(logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges, shape)
 
   const results = await Promise.all(
     posters.map((p) =>
@@ -588,6 +610,7 @@ export async function rankPostersByFit(
         logoOffsetY,
         hasBadges,
         offsetYVariants,
+        shape,
         context,
       }).catch((err: Error) => {
         log.warn(`Score failed for ${p.posterPath}`, { error: err.message })

@@ -2,7 +2,7 @@ import { buildPosterPublicUrl } from "@/lib/poster-public-url"
 import { buildStremioPosterSearchParams } from "@/lib/stremio-poster-params"
 import { isRankKey } from "@/lib/i18n"
 import type { ServerDefaults } from "@/lib/server-defaults"
-import type { Mapping } from "@/lib/types"
+import { effectiveMappingForShape, type Mapping } from "@/lib/types"
 
 export type StremioPosterType = "movie" | "series"
 
@@ -33,6 +33,9 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
   })
 
   const mapping = input.mapping ?? null
+  // Profili per-formato: in landscape l'URL esplicita il tuning del profilo
+  // orizzontale (stessa effettività del server — query > landscape > flat).
+  const eff = effectiveMappingForShape(mapping, mapping?.posterShape === "landscape" ? "landscape" : "poster")
   // Custom badge testuale salvato per-titolo: emesso come `extra` (il server
   // risolve le label prefissate __badge.* con la lingua della richiesta).
   // Le rank-key (__badge.today/anime/movie/series e label equivalenti) sono
@@ -65,29 +68,37 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
     ratingSources: input.defaults.ratingSources,
     badgeStyle: mapping?.badgeStyle ?? input.defaults.badgeStyle,
     rankingBadgeStyle: mapping?.rankingBadgeStyle ?? input.defaults.rankingBadgeStyle,
-    topBadgeScale: mapping?.topBadgeScale ?? input.defaults.topBadgeScale,
-    topBadgeOffsetX: mapping?.topBadgeOffsetX ?? input.defaults.topBadgeOffsetX,
-    topBadgeOffsetY: mapping?.topBadgeOffsetY ?? input.defaults.topBadgeOffsetY,
-    genreBadgeScale: mapping?.genreBadgeScale ?? input.defaults.genreBadgeScale,
-    qualityBadgeScale: mapping?.qualityBadgeScale ?? input.defaults.qualityBadgeScale,
-    genreBadgeOffsetX: mapping?.genreBadgeOffsetX ?? input.defaults.genreBadgeOffsetX,
-    genreBadgeOffsetY: mapping?.genreBadgeOffsetY ?? input.defaults.genreBadgeOffsetY,
-    qualityBadgeOffsetX: mapping?.qualityBadgeOffsetX ?? input.defaults.qualityBadgeOffsetX,
-    qualityBadgeOffsetY: mapping?.qualityBadgeOffsetY ?? input.defaults.qualityBadgeOffsetY,
-    networkLogoScale: mapping?.networkLogoScale ?? input.defaults.networkLogoScale,
-    networkLogoOffsetX: mapping?.networkLogoOffsetX ?? input.defaults.networkLogoOffsetX,
-    networkLogoOffsetY: mapping?.networkLogoOffsetY ?? input.defaults.networkLogoOffsetY,
-    gradientHeight: mapping?.gradientHeight ?? input.defaults.gradientHeight,
-    blurIntensity: mapping?.blurIntensity ?? input.defaults.blurIntensity,
-    blurFade: mapping?.blurFade ?? input.defaults.blurFade,
-    blurDarkness: mapping?.blurDarkness ?? input.defaults.blurDarkness,
-    blurEnabled: mapping?.blurEnabled ?? input.defaults.blurEnabled,
+    topBadgeScale: eff?.topBadgeScale ?? input.defaults.topBadgeScale,
+    topBadgeOffsetX: eff?.topBadgeOffsetX ?? input.defaults.topBadgeOffsetX,
+    topBadgeOffsetY: eff?.topBadgeOffsetY ?? input.defaults.topBadgeOffsetY,
+    genreBadgeScale: eff?.genreBadgeScale ?? input.defaults.genreBadgeScale,
+    qualityBadgeScale: eff?.qualityBadgeScale ?? input.defaults.qualityBadgeScale,
+    genreBadgeOffsetX: eff?.genreBadgeOffsetX ?? input.defaults.genreBadgeOffsetX,
+    genreBadgeOffsetY: eff?.genreBadgeOffsetY ?? input.defaults.genreBadgeOffsetY,
+    qualityBadgeOffsetX: eff?.qualityBadgeOffsetX ?? input.defaults.qualityBadgeOffsetX,
+    qualityBadgeOffsetY: eff?.qualityBadgeOffsetY ?? input.defaults.qualityBadgeOffsetY,
+    networkLogoScale: eff?.networkLogoScale ?? input.defaults.networkLogoScale,
+    networkLogoOffsetX: eff?.networkLogoOffsetX ?? input.defaults.networkLogoOffsetX,
+    networkLogoOffsetY: eff?.networkLogoOffsetY ?? input.defaults.networkLogoOffsetY,
+    gradientHeight: eff?.gradientHeight ?? input.defaults.gradientHeight,
+    blurIntensity: eff?.blurIntensity ?? input.defaults.blurIntensity,
+    blurFade: eff?.blurFade ?? input.defaults.blurFade,
+    blurDarkness: eff?.blurDarkness ?? input.defaults.blurDarkness,
+    blurEnabled: eff?.blurEnabled ?? input.defaults.blurEnabled,
     customBadge,
     title: mapping?.title ?? undefined,
     networkLogo: (input.defaults.networkLogo !== false) && (mapping?.networkLogo !== false),
     preRelease: input.defaults.preRelease,
     // ribbonSide solo globale: i mapping storici con valore salvato lo ignorano.
     ribbonSide: input.defaults.ribbonSide,
+    // Formato canvas: per-titolo vince sul default globale (come gli altri
+    // parametri espliciti). Emesso solo quando landscape (vedi params).
+    posterShape: mapping?.posterShape ?? input.defaults.posterShape,
+    // Allineamento: solo globale (il mapping non ha il campo) e solo
+    // landscape — i portrait non portano mai `align` (sempre centrati).
+    logoAlign: (mapping?.posterShape ?? input.defaults.posterShape) === "landscape"
+      ? input.defaults.logoAlign
+      : undefined,
   })
 
   params.forEach((value, key) => url.searchParams.set(key, value))

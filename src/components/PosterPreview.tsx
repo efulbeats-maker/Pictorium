@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { ImageOff, RefreshCw } from "lucide-react"
 import { usePSelector } from "@/lib/context"
 import { useT } from "@/lib/contexts/TranslationContext"
@@ -13,6 +13,8 @@ interface PosterPreviewProps {
   setImageError: (error: boolean) => void
   imgSrc: string
   onRetry?: () => void
+  /** Formato orizzontale 16:9: cornice video + immagine intera (contain). */
+  landscape?: boolean
 }
 
 export function PosterPreview({
@@ -21,7 +23,8 @@ export function PosterPreview({
   imageError,
   setImageError,
   imgSrc,
-  onRetry
+  onRetry,
+  landscape,
 }: PosterPreviewProps) {
   const selected = usePSelector((v) => v.selected)
   const selectedLogo = usePSelector((v) => v.selectedLogo)
@@ -32,10 +35,32 @@ export function PosterPreview({
   const toastRef = useRef(toast)
   toastRef.current = toast
 
+  // Anti-blank tra anteprime: il vecchio buffer resta dietro finché il nuovo
+  // non ha caricato, ma il nuovo dipinge subito in progressivo (niente gate
+  // di opacità: nasconderlo fino al load completo ritardava la prima pittura
+  // percepita). Mai più di un buffer precedente — ogni cambio lo sostituisce.
+  const [prevSrc, setPrevSrc] = useState<string | null>(null)
+  const shownRef = useRef<string>("")
+
+  useEffect(() => {
+    if (!imgSrc) {
+      shownRef.current = ""
+      setPrevSrc(null)
+      return
+    }
+    if (imgSrc === shownRef.current) return
+    setPrevSrc(shownRef.current || null)
+  }, [imgSrc])
+
+  const handleImgLoad = () => {
+    shownRef.current = imgSrc
+    setPrevSrc(null)
+  }
+
   return (
     <div role="img" aria-label={`Preview of ${selected?.title || selected?.name || ""} poster with ${selectedLogo ? "logo" : "no logo"}`}
          className={`preview-frame w-full rounded-[1.35rem] overflow-hidden relative ${previewPoster ? "preview-frame-active" : ""}`}>
-      <div className="relative aspect-[2/3] select-none pointer-events-none bg-zinc-950/70 overflow-hidden rounded-[1.2rem]">
+      <div className={`relative select-none pointer-events-none bg-zinc-950/70 overflow-hidden rounded-[1.2rem] ${landscape ? "aspect-video" : "aspect-[2/3]"}`}>
         {previewUrl ? (
           <>
             <div className="preview-loading-overlay" style={{ opacity: previewLoading ? 1 : 0 }} />
@@ -46,12 +71,22 @@ export function PosterPreview({
               <span className="w-2.5 h-2.5 rounded-full border-2 border-accent-orange/40 border-t-accent-orange animate-spin inline-block mr-1.5" />
               <span>{loadProgress}%</span>
             </div>
+            {prevSrc && prevSrc !== imgSrc && (
+              /* eslint-disable-next-line @next/next/no-img-element -- buffer precedente per il crossfade */
+              <img
+                src={prevSrc}
+                alt=""
+                aria-hidden="true"
+                className={`absolute inset-0 w-full h-full ${landscape ? "object-contain" : "object-cover"}`}
+              />
+            )}
             {imgSrc && (
               /* eslint-disable-next-line @next/next/no-img-element -- server-rendered poster */
               <img
                 src={imgSrc}
                 alt={selected?.title || selected?.name || ""}
-                className="absolute inset-0 w-full h-full object-cover"
+                onLoad={handleImgLoad}
+                className={`absolute inset-0 w-full h-full ${landscape ? "object-contain" : "object-cover"}`}
               />
             )}
           </>

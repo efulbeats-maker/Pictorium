@@ -1,9 +1,10 @@
 "use client"
 
 import React from "react"
-import { Check, Trash2, Maximize2, Folder } from "lucide-react"
+import { Check, Trash2, Maximize2, Folder, RectangleHorizontal, RectangleVertical } from "lucide-react"
 import { posterUrl } from "@/lib/utils"
 import type { Mapping } from "@/lib/types"
+import { effectiveMappingForShape } from "@/lib/types"
 import { PosterDepthEdge, PosterDepthSheen } from "@/components/PosterDepthGlow"
 
 interface MoodBoardTileProps {
@@ -15,6 +16,7 @@ interface MoodBoardTileProps {
   onOpen: () => void
   onQuickView: (e: React.MouseEvent) => void
   onRemove: (e: React.MouseEvent) => void
+  onToggleShape: (e: React.MouseEvent) => void
   collectionCount?: number
   t: (key: string, params?: Record<string, string | number>) => string
 }
@@ -28,6 +30,7 @@ export function MoodBoardTile({
   onOpen,
   onQuickView,
   onRemove,
+  onToggleShape,
   collectionCount = 0,
   t,
 }: MoodBoardTileProps) {
@@ -39,7 +42,13 @@ export function MoodBoardTile({
     : (m.genreName || "").toLowerCase().includes("anim")
       ? t("ui.filterAnime")
       : t("ui.tvSeries")
-  const displaySrc = m.posterPath ? posterUrl(m.posterPath, "w342") : null
+  // Dual-format: la tile mostra la base del formato primario (backdrop in
+  // landscape con fallback al poster) e il tuning effettivo di quel formato.
+  const isLandscape = m.posterShape === "landscape"
+  const eff = effectiveMappingForShape(m, isLandscape ? "landscape" : "poster")
+  const displaySrc = isLandscape
+    ? (m.backdropPath ? posterUrl(m.backdropPath, "w780") : (m.posterPath ? posterUrl(m.posterPath, "w500") : null))
+    : (m.posterPath ? posterUrl(m.posterPath, "w342") : null)
 
   return (
     <div
@@ -70,7 +79,7 @@ export function MoodBoardTile({
         <PosterDepthEdge edgeStrength={40} edgeCoverage={10} />
         <div className="relative z-[1]">
 
-      <div className="aspect-[2/3] bg-surface/80 overflow-hidden relative">
+      <div className={`${isLandscape ? "aspect-video" : "aspect-[2/3]"} bg-surface/80 overflow-hidden relative`}>
         {/* Poster image clean TMDB */}
         {displaySrc ? (
           // eslint-disable-next-line @next/next/no-img-element -- TMDB dynamic URL
@@ -95,15 +104,25 @@ export function MoodBoardTile({
           </div>
         )}
 
+        {/* Badge formato + DUAL (entrambi i profili salvati) */}
+        <span className="absolute top-2 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/60 text-zinc-300 backdrop-blur-md border border-white/10 pointer-events-none">
+          {isLandscape ? "16:9" : "2:3"}
+        </span>
+        {m.posterPath && m.backdropPath && (
+          <span className="absolute top-8 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-accent-orange/80 text-white backdrop-blur-md border border-white/10 pointer-events-none" title="DUAL">
+            DUAL
+          </span>
+        )}
+
         {/* Logo overlay: posizionato sul poster clean con scala e offset */}
         {m.logoPath && (
           <div
             className="absolute inset-x-0 bottom-[7.33%] flex items-center justify-center pointer-events-none"
             style={{
-              transform: `translate(${m.logoOffsetX ?? 0}%, ${-(m.logoOffsetY ?? 0)}%)`,
+              transform: `translate(${eff?.logoOffsetX ?? 0}%, ${-(eff?.logoOffsetY ?? 0)}%)`,
             }}
           >
-            <div style={{ width: `${m.logoScale ?? 75}%` }}>
+            <div style={{ width: `${eff?.logoScale ?? 75}%` }}>
               {/* eslint-disable-next-line @next/next/no-img-element -- TMDB dynamic URL */}
               <img
                 src={posterUrl(m.logoPath, "w300")}
@@ -172,6 +191,20 @@ export function MoodBoardTile({
             className="absolute top-2 left-2 w-10 h-10 rounded-lg bg-red-900/70 flex items-center justify-center text-xs text-red-300 hover:bg-red-800 hover:text-red-200 active:scale-90 transition-all duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-lg shadow-black/30 touch-manipulation"
           >
             <Trash2 className="w-4 h-4" />
+          </button>
+        )}
+
+        {/* Quick toggle formato primario (dual-format, zero attrito) */}
+        {!selectMode && (
+          <button
+            type="button"
+            aria-label={isLandscape ? t("ui.setAsPortrait") : t("ui.setAsLandscape")}
+            title={isLandscape ? t("ui.setAsPortrait") : t("ui.setAsLandscape")}
+            onClick={(e) => { e.stopPropagation(); onToggleShape(e) }}
+            onKeyDown={(e) => e.stopPropagation()}
+            className="absolute bottom-2 left-2 w-10 h-10 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-black/85 active:scale-90 transition-all duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-lg shadow-black/30 z-10 touch-manipulation"
+          >
+            {isLandscape ? <RectangleVertical className="w-4 h-4" /> : <RectangleHorizontal className="w-4 h-4" />}
           </button>
         )}
 

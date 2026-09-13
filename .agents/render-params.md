@@ -11,7 +11,7 @@ When you modify a visual render parameter in one file, update its server counter
 
 ## Badge Genere/Rating (GenreRatingBadges)
 
-**Componenti configurabili** (`bg`/`by`/`br`): genere, anno e voto si attivano **indipendentemente**. Default tutti ON → output byte-identico al passato (`Dramma • ★ 8.2 • 2024`). Il badge si mostra se almeno un componente abilitato ha un valore disponibile (`hasGenreBadge = badgesEnabled && ((genre && bg) || (rating > 0 && br) || (year && by))`). Lato SVG i segmenti sono condizionali in `badge-svg-shared.ts:buildGenreTextFlow` — il `dx` di separazione si emette solo se il segmento ha un precedente visibile (per non sfuocare dal centro quando anno o voto sono il primo segmento).
+**Componenti configurabili** (`bg`/`by`/`br`): genere, anno e voto si attivano **indipendentemente**. Default tutti ON → output byte-identico al passato (`Dramma • ★ 8.2 • 2024`). Il badge si mostra se almeno un componente abilitato ha un valore disponibile (`hasGenreBadge = badgesEnabled && ((genre && bg) || (rating > 0 && br) || (year && by))`). Lato SVG i segmenti sono condizionali in `badge-svg-shared.ts:buildGenreTextFlow` — il `dx` di separazione si emette solo se il segmento ha un precedente visibile (per non sfuocare dal centro quando anno o voto sono il primo segmento). In landscape i badge si rendono con `pw = 500` (`badgePw` in `poster-service.ts`: stessi pixel assoluti del portrait); il badge superiore centrale (rank/extra, non nastro) è al 120% (`topBadgePw`); posizioni, overflow-protection e chiavi cache restano sul canvas vero (`LAND_W/H`). Le barre in landscape sono centrate come lower-third invece che full-width. Il logo in landscape è contenuto a max 55% larghezza e 28% altezza (`maxWidthPct`/`maxHeightPct` in `logo-layout.ts`) con margine inferiore 25%. Il gradiente di default in landscape è 20% invece di 30% (solo quando non esplicitato).
 
 | Parametro | Server (`svg-badge.ts:renderGenreBadge`) |
 |---|---|
@@ -112,7 +112,7 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 | `animerank` | rank anime del titolo selezionato (da `mdblistAnimeList`, solo preview WYSIWYG) | `qAnimeRank` — override del rank anime (`media_type=tv`); senza, il server lo calcola da `fetchMDBList` con la chiave della richiesta o il fallback d'istanza (`PICTORIUM_MDBLIST_KEY`) |
 | `label` | `badge.rankLabel \|\| badge.label` | `qLabel` — override label ranking |
 | `extra` | `badge.label` (se extra) o `customBadge` | `queryExtra` — forza badge extra |
-| `bs` | `badgeStyle` | `qBs` — "shadow"/"pill"/"bar"/"colored"/"bordo"/"vetro" |
+| `bs` | `badgeStyle` | `qBs` — "shadow"/"pill"/"bar"/"colored"/"bordo"/"vetro" (in landscape forzato a "shadow": solo default per ora) |
 | `rs` | `rankingBadgeStyle` | `qRs` — "default"/"bar"/"colored"/"pill"/"netflix" |
 | `tscale`/`tox`/`toy` | `topBadgeScale`/`topBadgeOffsetX`/`topBadgeOffsetY` (badge superiore) | scala `%` 10..200 (default 100, tutti gli stili) + offset px (default 0, solo centrati) |
 | `gscale` | `genreBadgeScale` (badge genere/rating in basso) | scala `%` 10..200 (default 100 su base 120% nativa; la **barra** scala nativa via font per restare full-width) |
@@ -122,6 +122,8 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 | `netscale` | `networkLogoScale` (logo network) | scala `%` 10..200 (default 100) |
 | `nox`/`noy` | `networkLogoOffsetX`/`networkLogoOffsetY` | offset px (default 0) |
 | `side` | `ribbonSide === "right" ? "right" : null` (modalità Stremio; default Nuvio = sinistra) | `qSide` — "right" sposta nastro Netflix (specchiato) + logo network + nastro Coming Soon a destra |
+| `shape` | `posterShape` (sempre esplicito in preview: `poster`/`landscape`; default globale `defaultPosterShape`, per-titolo dal mapping) | catena `shape` > mapping (`posterShape`) > config token > server defaults (`PICTORIUM_POSTER_SHAPE`) > `"poster"` — solo `landscape` attiva il canvas 16:9 (`LAND_W=768/LAND_H=432`, base = backdrop TMDB via `posterUrlOriginal`); emesso negli URL Stremio solo quando landscape (il portrait resta omesso per non invalidare la cache) |
+| `align` | `logoAlign` (sempre esplicito in preview) | `left`/`center` esplicito > default globale **solo landscape** (`sd.logoAlign`) > default di formato (landscape `left`, poster `center`) — i portrait sono sempre centrati, nessun globale li sposta mai |
 | `ac` | `accentColor` (da `extractBadgeColor()`) | `qAc` — override colore accent |
 
 > URL Stremio (cataloghi/meta): `buildStremioPosterUrl()` emette gli stessi parametri ma dal **mapping salvato con fallback ai default** (`mapping?.X ?? defaults.X`) per `badges`/`ranking`/`bs`/`rs`/`gradHeight`/`blur`/`bf`/`bd`/`be`/`extra`/`tscale`/`tox`/`toy`/`gscale`/`gox`/`goy`/`qscale`/`qox`/`qoy`/`netscale`/`nox`/`noy` — emissione sempre esplicita, così la precedenza server (query > mapping > config > defaults) resta fedele al per-titolo anche con installazioni `?config=` (dove il token scavalcerebbe il mapping). `extra` è emesso solo per customBadge **non** rank-key (`isRankKey`): le rank-key viaggiano via rank live + fallback `mapping.badgeRank`/`trendRank`/`animeRank` su fetch fallito (mai su miss genuina: un titolo uscito dalla chart non resuscita il rank stantio), altrimenti `queryExtra` duplicherebbe il badge (vince sul calcolato).

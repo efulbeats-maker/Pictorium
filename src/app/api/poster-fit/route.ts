@@ -6,6 +6,7 @@ import { BEST_FIT_GLOBAL } from "@/lib/best-fit-config"
 import { createLogger } from "@/lib/logger"
 import { readJsonBody, BodyTooLargeError } from "@/lib/read-body"
 import { checkAdminToken, isSameOrigin, adminAuthResponse, originMismatchResponse } from "@/lib/auth"
+import { initSharp } from "@/lib/sharp-config"
 
 const log = createLogger("poster-fit-api")
 
@@ -20,7 +21,8 @@ interface PosterFitBody {
   logoOffsetX?: number
   logoOffsetY?: number
   hasBadges?: boolean
-  posterSize?: "w342" | "w500"
+  posterSize?: "w342" | "w500" | "w780" | "w300"
+  shape?: "poster" | "landscape"
   voteAverages?: number[]
   widths?: number[]
   heights?: number[]
@@ -59,7 +61,8 @@ async function fetchImage(url: string, signal: AbortSignal): Promise<Buffer> {
 }
 
 const MAX_BODY_BYTES = 50_000
-const POSTER_SIZES = new Set(["w342", "w500"])
+const POSTER_SIZES = new Set(["w342", "w500", "w780", "w300"])
+const FIT_SHAPES = new Set(["poster", "landscape"])
 
 export async function POST(req: NextRequest) {
   const rl = await rateLimit(rateLimitKey(req), "search")
@@ -77,6 +80,10 @@ export async function POST(req: NextRequest) {
   if (BEST_FIT_GLOBAL === "off") {
     return Response.json({ ranked: [], bestPosterPath: null, total: 0, failed: 0, disabled: true })
   }
+
+  // HF Spaces 512MB: cap sharp come la route poster (concurrency/memoria),
+  // altrimenti libvips parte a ncore thread sui 16 candidati → OOM.
+  initSharp()
 
   const contentLength = Number(req.headers.get("content-length") || "0")
   if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
@@ -110,11 +117,16 @@ for (const field of ["logoScale", "logoOffsetX", "logoOffsetY"] as const) {
 if (body.hasBadges !== undefined && typeof body.hasBadges !== "boolean") {
   return Response.json({ error: "Invalid body field: 'hasBadges' must be a boolean" }, { status: 400 })
 }
+if (body.shape !== undefined && !FIT_SHAPES.has(body.shape)) {
+  return Response.json({ error: "Invalid body field: 'shape' must be 'poster' or 'landscape'" }, { status: 400 })
+}
 
 // logoPath entra in una URL TMDB: deve essere un path assoluto, non una URL.
 if (!body.logoPath.startsWith("/")) {
   return Response.json({ error: "logoPath must be a path starting with '/'" }, { status: 400 })
 }
+
+  const shape = body.shape === "landscape" ? "landscape" as const : "poster" as const
 
   // Endpoint CPU/network-heavy: limita il numero di candidati da analizzare.
   if (body.posterPaths.length > MAX_CANDIDATES) {
@@ -129,11 +141,13 @@ if (!body.logoPath.startsWith("/")) {
       width: body.widths?.[index] ?? 0,
       height: body.heights?.[index] ?? 0,
     })),
+    shape,
   )
 
   // posterSize entra nel path dell'URL TMDB: set chiuso per evitare
-  // dimensioni/percorsi arbitrari.
-  const posterSize = POSTER_SIZES.has(body.posterSize || "") ? body.posterSize! : "w342"
+  // dimensioni/percorsi arbitrari. Default w780 in landscape (backdrop),
+  // w342 in portrait.
+  const posterSize = POSTER_SIZES.has(body.posterSize || "") ? body.posterSize! : (shape === "landscape" ? "w780" : "w342")
   const logoScale = body.logoScale ?? 75
   const logoOffsetX = body.logoOffsetX ?? 0
   const logoOffsetY = body.logoOffsetY ?? 0
@@ -194,6 +208,7 @@ if (!body.logoPath.startsWith("/")) {
     logoOffsetY,
     hasBadges,
     [-20, 0, 20],
+    shape,
   )
 
   const ranked = rankedResults.map((r) => ({

@@ -119,4 +119,23 @@ describe("poster editor current/default split", () => {
     expect(putBodies).toHaveLength(1)
     expect((putBodies[0] as { badgeGenre: boolean }).badgeGenre).toBe(true)
   })
+
+  it("setPosterShape syncs logoAlign to format default", () => {
+    const { result } = renderHook(() => usePosterEditor(), { wrapper })
+    expect(result.current.posterShape).toBe("poster")
+    expect(result.current.logoAlign).toBe("center")
+
+    act(() => {
+      result.current.setPosterShape("landscape")
+    })
+    expect(result.current.posterShape).toBe("landscape")
+    expect(result.current.logoAlign).toBe("left")
+
+    act(() => {
+      result.current.setPosterShape("poster")
+    })
+    expect(result.current.posterShape).toBe("poster")
+    expect(result.current.logoAlign).toBe("center")
+  })
 })
+

@@ -102,6 +102,8 @@ export const MOCK_CTX: PictoriumCtx = {
   setAccentColor: stubFn,
   topEdgeColor: null,
   autoSaveExcludedPosters: asyncStubFn,
+  autoSaveExcludedBackdrops: asyncStubFn,
+  prefetchTitle: stubFn,
   theme: "dark",
   setTheme: stubFn,
   uiAccent: false,

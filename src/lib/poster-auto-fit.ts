@@ -2,6 +2,7 @@ import sharp from "sharp"
 import { rankPostersByFit } from "@/lib/poster-fit-score"
 import { concurrentMap } from "@/lib/episode-ordering"
 import { envWithFallback } from "@/lib/env-compat"
+import type { PosterShape } from "@/lib/types"
 import {
   adjustFitResults,
   selectAcceptedPosterPath,
@@ -34,6 +35,9 @@ interface SelectBestLogoFitPosterInput {
   readonly logoOffsetX?: number | null
   readonly logoOffsetY?: number | null
   readonly hasBadges: boolean
+  /** Formato canvas: "landscape" candida sfondi 16:9 e analizza a 768×432
+   *  con layout Cinematic Left. Default "poster". */
+  readonly shape?: PosterShape
 }
 
 // Più candidati del passato (8): col decode-once dello scoring il budget di
@@ -75,7 +79,7 @@ function cacheKey(candidates: readonly PosterCandidate[], input: SelectBestLogoF
   const posterSignature = candidates.map((poster) =>
     `${poster.file_path}:${poster.vote_average ?? "x"}:${poster.width ?? "x"}:${poster.height ?? "x"}`,
   ).join(",")
-  return `auto-fit:${posterSignature}:${input.logoPath}:${input.logoScale ?? "auto"}:${input.logoOffsetX ?? 0}:${input.logoOffsetY ?? 0}:${input.hasBadges}`
+  return `auto-fit:${posterSignature}:${input.logoPath}:${input.logoScale ?? "auto"}:${input.logoOffsetX ?? 0}:${input.logoOffsetY ?? 0}:${input.hasBadges}:${input.shape ?? "poster"}`
 }
 
 function cacheGet(key: string): PosterFitSelection | null {
@@ -120,17 +124,19 @@ function defaultLogoScale(logoBuffer: Buffer): Promise<number> {
 }
 
 const IDEAL_ASPECT = 2 / 3
+const LANDSCAPE_ASPECT = 16 / 9
 const MAX_ASPECT_DIFF = 0.08
 
-function hasPosterAspectRatio(poster: PosterCandidate): boolean {
+function hasPosterAspectRatio(poster: PosterCandidate, shape?: PosterShape): boolean {
   const width = poster.width ?? 0
   const height = poster.height ?? 0
   if (width <= 0 || height <= 0) return true
-  return Math.abs(width / height - IDEAL_ASPECT) <= MAX_ASPECT_DIFF
+  const ideal = shape === "landscape" ? LANDSCAPE_ASPECT : IDEAL_ASPECT
+  return Math.abs(width / height - ideal) <= MAX_ASPECT_DIFF
 }
 
-export function selectAutoFitCandidates(posters: readonly PosterCandidate[]): PosterCandidate[] {
-  const clean = posters.filter((poster) => poster.iso_639_1 === null && hasPosterAspectRatio(poster))
+export function selectAutoFitCandidates(posters: readonly PosterCandidate[], shape?: PosterShape): PosterCandidate[] {
+  const clean = posters.filter((poster) => poster.iso_639_1 === null && hasPosterAspectRatio(poster, shape))
   return Array.from(
     new Map(clean.map((poster) => [poster.file_path, poster])).values(),
   ).slice(0, TMDB_CANDIDATE_COUNT)
@@ -144,22 +150,23 @@ export async function rankBestFitPosters(
   logoOffsetY: number,
   hasBadges: boolean,
   offsetYVariants?: number[],
+  shape?: PosterShape,
 ): Promise<RankedFitResult[]> {
   if (posterEntries.length === 0) return []
 
   const ranked = await withTimeout(
-    rankPostersByFit(posterEntries, logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges, offsetYVariants),
+    rankPostersByFit(posterEntries, logoBuffer, logoScale, logoOffsetX, logoOffsetY, hasBadges, offsetYVariants, shape),
     posterEntries.map((p) => ({ posterPath: p.posterPath, score: 0, metrics: { cleanliness: 0, contrast: 0, detailPenalty: 0, badgeReadability: 0 }, reasons: [] })),
     AUTO_FIT_TIMEOUT_MS,
   )
 
   if (ranked.length === 0) return []
 
-  return adjustFitResults({ ranked, posterEntries })
+  return adjustFitResults({ ranked, posterEntries, shape })
 }
 
 export async function selectBestLogoFitPosterPath(input: SelectBestLogoFitPosterInput): Promise<PosterFitSelection | null> {
-  const candidates = selectAutoFitCandidates(input.posters)
+  const candidates = selectAutoFitCandidates(input.posters, input.shape)
 
   const firstCandidate = candidates[0]?.file_path ?? null
   if (candidates.length < 2) return { posterPath: firstCandidate }
@@ -219,6 +226,7 @@ export async function selectBestLogoFitPosterPath(input: SelectBestLogoFitPoster
     input.logoOffsetY ?? 0,
     input.hasBadges,
     [-20, 0, 20],
+    input.shape,
   )
 
   const selectedPosterPath = selectAcceptedPosterPath(rankedResults, fallbackResult.posterPath)

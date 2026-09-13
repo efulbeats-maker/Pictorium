@@ -52,10 +52,14 @@ const USER_SAVED = {
   customRatingApiKeyHeader: "",
   ratingSources: ["imdb", "tmdb"],
   autoRotateClean: false,
-  defaultLogoFitEnabled: true,
+  defaultAutoRotateBackdrop: false,
+  defaultPortraitFitEnabled: true,
+  defaultLandscapeFitEnabled: true,
   networkLogo: true,
   preRelease: false,
   ribbonSide: "left",
+  posterShape: "poster",
+  logoAlign: null,
   episodeMetadataSource: "tvdb",
   region: "IT",
 }
@@ -177,6 +181,16 @@ describe("useDefaults hydration", () => {
     expect(last.badgeYear).toBe(true)
     expect(last.defaultBadgeYear ?? last.badgeYear).toBe(true)
     expect(JSON.parse(storage.getItem("badgeDefaults")!).badgeYear).toBe(true)
+  })
+
+  it("migra il vecchio flag unico sui due formati", async () => {
+    storage.setItem("badgeDefaults", JSON.stringify({ defaultLogoFitEnabled: false }))
+    const { result } = renderHook(() => useDefaults())
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200)
+    })
+    expect(result.current.defaultPortraitFitEnabled).toBe(false)
+    expect(result.current.defaultLandscapeFitEnabled).toBe(false)
   })
 
   it("setGradientHeight tocca solo il corrente, il default salvato resta", async () => {

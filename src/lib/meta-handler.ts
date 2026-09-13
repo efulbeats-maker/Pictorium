@@ -55,7 +55,7 @@ export interface StremioMetaDetail {
   name: string
   genres: string[]
   poster: string | null
-  posterShape?: "poster"
+  posterShape?: "poster" | "landscape"
   background?: string
   logo?: string
   description?: string
@@ -255,6 +255,18 @@ export async function pictoriumMeta(
 
     const primaryId = imdbId || `tmdb:${tmdbId}`
     const poster = await pictoriumPosterUrl(req, stType, tmdbId, configParam, userParam, posterLang)
+    // Formato canvas: mapping salvato > config token/default server.
+    // Coerente col poster URL sopra (stesse sorgenti) così `posterShape`
+    // e immagine non divergono mai.
+    let posterShape: "poster" | "landscape" = "poster"
+    try {
+      const shapeMapping = await getById(tmdbMediaType, tmdbId)
+      if (shapeMapping?.posterShape === "landscape" || shapeMapping?.posterShape === "poster") {
+        posterShape = shapeMapping.posterShape
+      } else if (userConfig?.posterShape === "landscape" || userConfig?.posterShape === "poster") {
+        posterShape = userConfig.posterShape
+      }
+    } catch { /* ignore — resta portrait */ }
     const background = details.backdrop_path ? posterUrlOriginal(details.backdrop_path) : undefined
 
     // Risoluzione Logo
@@ -409,7 +421,7 @@ export async function pictoriumMeta(
       name: details.title || details.name || "",
       genres: (details.genres || []).map((g) => g.name),
       poster,
-      posterShape: "poster",
+      posterShape,
       background,
       logo,
       description: details.overview || details.tagline || undefined,

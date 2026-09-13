@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { resolvePosterRenderConfig, clamp, type PosterRenderConfigInput } from "@/lib/poster-config"
+import { resolvePosterRenderConfig, resolvePosterShape, clamp, type PosterRenderConfigInput } from "@/lib/poster-config"
 import type { Mapping } from "@/lib/types"
 import type { PictoriumUserConfig } from "@/lib/config-token"
 
@@ -73,6 +73,17 @@ describe("resolvePosterRenderConfig", () => {
       sd: { badgeStyle: "bordo" },
     }))
     expect(r.badgeStyle).toBe("pill")
+  })
+
+  it("landscape forces shadow even when query, mapping, config and defaults disagree", () => {
+    const r = resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ bs: "pill", shape: "landscape" }),
+      mapping: mapping({ posterShape: "landscape", badgeStyle: "colored" }),
+      configOverride: config({ badgeStyle: "bar" }),
+      sd: { badgeStyle: "bordo" },
+    }))
+    expect(r.posterShape).toBe("landscape")
+    expect(r.badgeStyle).toBe("shadow")
   })
 
   it("query rs beats mapping, config token and server defaults", () => {
@@ -558,5 +569,74 @@ describe("resolvePosterRenderConfig", () => {
       configOverride: config({ ratingSources: ["letterboxd", "trakt"] }),
     }))
     expect(rConfig.ratingSources).toEqual(["letterboxd", "trakt"])
+  })
+
+  it("posterShape: query shape wins, then mapping, then config token, then sd, then poster", () => {
+    expect(resolvePosterShape(new URLSearchParams({ shape: "landscape" }), mapping({ posterShape: "poster" }), config({ posterShape: "poster" }), { posterShape: "poster" })).toBe("landscape")
+    expect(resolvePosterShape(new URLSearchParams({ shape: "poster" }), mapping({ posterShape: "landscape" }), config({ posterShape: "landscape" }), { posterShape: "landscape" })).toBe("poster")
+    expect(resolvePosterShape(new URLSearchParams(), mapping({ posterShape: "landscape" }), config({ posterShape: "poster" }), { posterShape: "poster" })).toBe("landscape")
+    expect(resolvePosterShape(new URLSearchParams(), null, config({ posterShape: "landscape" }), { posterShape: "poster" })).toBe("landscape")
+    expect(resolvePosterShape(new URLSearchParams(), null, null, { posterShape: "landscape" })).toBe("landscape")
+    expect(resolvePosterShape(new URLSearchParams(), null, null, {})).toBe("poster")
+  })
+
+  it("posterShape: unknown query value falls back to mapping/config/sd (never garbage)", () => {
+    expect(resolvePosterShape(new URLSearchParams({ shape: "panorama" }), mapping({ posterShape: "landscape" }), null, {})).toBe("landscape")
+    expect(resolvePosterShape(new URLSearchParams({ shape: "panorama" }), null, null, {})).toBe("poster")
+  })
+
+  it("gradientHeight defaults to 20 in landscape, 30 in portrait", () => {
+    expect(resolvePosterRenderConfig(baseInput()).blurHeight).toBe(30)
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).blurHeight).toBe(20)
+    // Query/mapping/config espliciti vincono sul default di formato.
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape", gradHeight: "40" }),
+    })).blurHeight).toBe(40)
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+      mapping: mapping({ gradientHeight: 45 }),
+    })).blurHeight).toBe(45)
+  })
+
+  it("resolvePosterRenderConfig exposes posterShape from the same chain", () => {
+    expect(resolvePosterRenderConfig(baseInput()).posterShape).toBe("poster")
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).posterShape).toBe("landscape")
+    expect(resolvePosterRenderConfig(baseInput({
+      mapping: mapping({ posterShape: "landscape" }),
+    })).posterShape).toBe("landscape")
+  })
+
+  it("logoAlign: query wins, global only in landscape, portrait always center", () => {
+    expect(resolvePosterRenderConfig(baseInput()).logoAlign).toBe("center")
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).logoAlign).toBe("left")
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape", align: "center" }),
+    })).logoAlign).toBe("center")
+    // Il default globale non sposta mai i portrait (contratto legacy).
+    expect(resolvePosterRenderConfig(baseInput({
+      sd: { logoAlign: "left" },
+    })).logoAlign).toBe("center")
+    expect(resolvePosterRenderConfig(baseInput({
+      sd: { logoAlign: "center" },
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).logoAlign).toBe("center")
+    expect(resolvePosterRenderConfig(baseInput({
+      sd: { logoAlign: "left" },
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).logoAlign).toBe("left")
+    // Query align=left su portrait viene ignorato (portrait resta sempre centrato).
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ align: "left" }),
+    })).logoAlign).toBe("center")
+    // Valori ignoti cadono sul default di formato, mai spazzatura al renderer.
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape", align: "diagonal" }),
+    })).logoAlign).toBe("left")
   })
 })

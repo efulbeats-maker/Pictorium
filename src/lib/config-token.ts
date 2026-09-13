@@ -57,6 +57,7 @@ export const configTokenSchema = z.object({
   networkLogoOffsetY: z.number().finite().optional(),
   networkLogo: z.boolean(),
   preRelease: z.boolean().optional(),
+  posterShape: z.enum(["poster", "landscape"]).optional(),
   autoRotateClean: z.boolean(),
   // Opzionale (finding 13): i token generati prima dell'aggiunta del campo
   // (best-fit) non devono fallire il safeParse — il render usa il default del

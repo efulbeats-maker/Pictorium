@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, Star, Trophy, Tv, Sparkles, Palette, Layers, Cloud } from "lucide-react"
+import { ChevronDown, Star, Trophy, Tv, Sparkles, Palette, Layers, Cloud, RotateCcw } from "lucide-react"
 import { usePSelector } from "@/lib/context"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { usePosterEditor } from "@/lib/contexts/PosterEditorContext"
@@ -326,6 +326,7 @@ export function BadgeControls() {
         <BadgeStyleSelector
           value={ed.badgeStyle}
           options={["shadow", "pill", "bar", "colored", "bordo", "vetro"]}
+          disabled={ed.posterShape === "landscape" ? ["pill", "bar", "colored", "bordo", "vetro"] : undefined}
           onChange={ed.setBadgeStyle}
           t={t}
           accentColor={accentColor}
@@ -356,10 +357,10 @@ export function BadgeControls() {
                   if (autoAccentColor) setAccentColor(autoAccentColor)
                   else setAccentColor(null)
                 }}
-                className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors px-1.5 py-0.5 rounded bg-surface2/50 border border-surface2 hover:bg-surface2"
+                className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors px-1.5 py-0.5 rounded bg-surface2/50 border border-surface2 hover:bg-surface2 flex items-center gap-1"
                 title={t("ui.resetAutoColor")}
               >
-                ↺ Reset
+                <RotateCcw className="w-3 h-3" />Reset
               </button>
             ) : (
               <span className="text-[10px] text-zinc-500 italic">

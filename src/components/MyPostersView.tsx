@@ -6,7 +6,7 @@ import { useT } from "@/lib/contexts/TranslationContext"
 import { toSearchResult } from "@/lib/types"
 import { posterUrl } from "@/lib/utils"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
-import { Search, X, Square, CheckSquare, Trash2, Calendar, ArrowUpAZ, ChevronDown, Clapperboard, Tv, Sparkles, LayoutGrid, ListOrdered } from "lucide-react"
+import { Search, X, Square, CheckSquare, Trash2, Calendar, ArrowUpAZ, ChevronDown, Clapperboard, Tv, Sparkles, LayoutGrid, ListOrdered, RectangleHorizontal, RectangleVertical } from "lucide-react"
 import { http } from "@/lib/http"
 import { MoodBoardTile } from "@/components/MoodBoardTile"
 import { PosterLightbox } from "@/components/PosterLightbox"
@@ -31,6 +31,7 @@ export function MyPostersView() {
   const deferredFilter = useDeferredValue(filter)
   const filterRef = useRef<HTMLInputElement>(null)
   const [typeFilter, setTypeFilter] = useState<"all" | "movie" | "tv" | "anime">("all")
+  const [formatFilter, setFormatFilter] = useState<"all" | "poster" | "landscape">("all")
   const [selectMode, setSelectMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showDeleteAll, setShowDeleteAll] = useState(false)
@@ -77,6 +78,23 @@ export function MyPostersView() {
     setConfirmRemove(null)
     setConfirmAnchor(null)
   }
+
+  // Dual-format: flip rapido del formato primario (PUT parziale con merge
+  // server-side: tuning e backdrop preservati; updatedAt cambia → mv nuova →
+  // niente staleness Stremio; il PUT invalida cache poster e cataloghi).
+  const toggleMappingShape = useCallback(async (m: Mapping) => {
+    const next = m.posterShape === "landscape" ? "poster" : "landscape"
+    try {
+      await http(`/api/mappings/${m.mediaType}:${m.tmdbId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ posterShape: next }),
+      })
+      await loadMappings()
+    } catch (e) {
+      console.error("[pictorium] Toggle shape failed:", e)
+    }
+  }, [loadMappings])
 
   // Cleanup dei timer di chiusura dropdown su unmount: evita setState su
   // componente smontato (warning React) e timer pendenti dopo la navigazione.
@@ -198,16 +216,18 @@ export function MyPostersView() {
     return acc
   }, [collections, mappings])
 
-  const filtered = useMemo(() => {
+  // Filtro base senza formato: le due sezioni (verticale/orizzontale)
+  // ripartiscono questi stessi item, così ricerca/tipo/collezione/ordinamento
+  // valgono identici in entrambe.
+  const baseFiltered = useMemo(() => {
     return mappings
       .filter((m) => {
         // deferredFilter: la digitazione resta a 60fps (input immediato),
         // la griglia rincorre a priorità bassa senza bloccare il keystroke.
         if (!m.title.toLowerCase().includes(deferredFilter.toLowerCase())) return false
-        if (typeFilter === "all") return true
-        if (typeFilter === "movie") return m.mediaType === "movie"
-        if (typeFilter === "tv") return m.mediaType === "tv" && !(m.genreName || "").toLowerCase().includes("anim")
-        if (typeFilter === "anime") return m.mediaType === "tv" && (m.genreName || "").toLowerCase().includes("anim")
+        if (typeFilter === "movie" && m.mediaType !== "movie") return false
+        if (typeFilter === "tv" && !(m.mediaType === "tv" && !(m.genreName || "").toLowerCase().includes("anim"))) return false
+        if (typeFilter === "anime" && !(m.mediaType === "tv" && (m.genreName || "").toLowerCase().includes("anim"))) return false
         return true
       })
       .filter((m) => {
@@ -218,6 +238,45 @@ export function MyPostersView() {
       })
       .sort((a, b) => sortBy === "updated" ? b.updatedAt.localeCompare(a.updatedAt) : a.title.localeCompare(b.title))
   }, [mappings, deferredFilter, sortBy, typeFilter, activeCollection, collections])
+
+  // Sezioni separate per formato: mai verticali e orizzontali mischiati.
+  const portraitItems = useMemo(
+    () => baseFiltered.filter((m) => m.posterShape !== "landscape"),
+    [baseFiltered],
+  )
+  const landscapeItems = useMemo(
+    () => baseFiltered.filter((m) => m.posterShape === "landscape"),
+    [baseFiltered],
+  )
+  const filtered = useMemo(() => {
+    if (formatFilter === "poster") return portraitItems
+    if (formatFilter === "landscape") return landscapeItems
+    return baseFiltered
+  }, [baseFiltered, portraitItems, landscapeItems, formatFilter])
+
+  const renderTiles = useCallback((items: Mapping[]) => (
+    items.map((m, idx) => (
+      <MoodBoardTile
+        key={`${m.mediaType}:${m.tmdbId}`}
+        mapping={m}
+        idx={idx}
+        selectMode={selectMode}
+        selected={selected}
+        onSelect={() => toggleSelect(`${m.mediaType}:${m.tmdbId}`)}
+        onOpen={() => navigateToPoster(toSearchResult({ id: m.tmdbId, media_type: m.mediaType, title: m.title, name: m.title, poster_path: m.posterPath }), "myposters")}
+        onQuickView={(e) => {
+          const target = e.currentTarget as HTMLElement
+          const tileEl = target.closest(".surface-card") || target.closest(".group") || target
+          const rect = tileEl ? tileEl.getBoundingClientRect() : new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0)
+          setLightbox({ mapping: m, rect })
+        }}
+        onRemove={(e) => openRemoveConfirm(e, m)}
+        onToggleShape={() => void toggleMappingShape(m)}
+        collectionCount={collections.filter((c) => c.posterIds.includes(`${m.mediaType}:${m.tmdbId}`)).length}
+        t={t}
+      />
+    ))
+  ), [selectMode, selected, navigateToPoster, openRemoveConfirm, toggleMappingShape, collections, t])
 
   useEffect(() => {
     if (!sortOpen) return
@@ -345,6 +404,36 @@ export function MyPostersView() {
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>{t("ui.filterAnime")}</span>
+            </button>
+          </div>
+
+          {/* Segmented Formato Canvas (dual-format) */}
+          <div className="flex items-center p-1 bg-surface rounded-xl border border-surface2/60 gap-1 overflow-x-auto" role="group" aria-label={t("ui.posterShape")}>
+            <button
+              type="button"
+              onClick={() => setFormatFilter(formatFilter === "poster" ? "all" : "poster")}
+              title={t("ui.posterShapePortrait")}
+              aria-pressed={formatFilter === "poster"}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shrink-0 ${
+                formatFilter === "poster"
+                  ? "bg-accent-orange/15 text-accent-orange border border-accent-orange/30 font-semibold shadow-sm"
+                  : "text-muted hover:text-zinc-200 hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <RectangleVertical className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormatFilter(formatFilter === "landscape" ? "all" : "landscape")}
+              title={t("ui.posterShapeLandscape")}
+              aria-pressed={formatFilter === "landscape"}
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 flex items-center gap-1.5 shrink-0 ${
+                formatFilter === "landscape"
+                  ? "bg-accent-orange/15 text-accent-orange border border-accent-orange/30 font-semibold shadow-sm"
+                  : "text-muted hover:text-zinc-200 hover:bg-white/5 border border-transparent"
+              }`}
+            >
+              <RectangleHorizontal className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -573,29 +662,39 @@ export function MyPostersView() {
           )}
         </div>
       )}
-      {/* Mood Board layout */}
-      <div className="mx-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 md:gap-4 max-w-7xl">
-        {filtered.map((m, idx) => (
-          <MoodBoardTile
-            key={`${m.mediaType}:${m.tmdbId}`}
-            mapping={m}
-            idx={idx}
-            selectMode={selectMode}
-            selected={selected}
-            onSelect={() => toggleSelect(`${m.mediaType}:${m.tmdbId}`)}
-            onOpen={() => navigateToPoster(toSearchResult({ id: m.tmdbId, media_type: m.mediaType, title: m.title, name: m.title, poster_path: m.posterPath }), "myposters")}
-            onQuickView={(e) => {
-              const target = e.currentTarget as HTMLElement
-              const tileEl = target.closest(".surface-card") || target.closest(".group") || target
-              const rect = tileEl ? tileEl.getBoundingClientRect() : new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0)
-              setLightbox({ mapping: m, rect })
-            }}
-            onRemove={(e) => openRemoveConfirm(e, m)}
-            collectionCount={collections.filter((c) => c.posterIds.includes(`${m.mediaType}:${m.tmdbId}`)).length}
-            t={t}
-          />
-        ))}
-      </div>
+      {/* Sezioni separate per formato (mai mischiati): con un filtro formato
+          attivo si mostra la sola sezione, altrimenti prima i verticali 2:3
+          poi gli orizzontali 16:9 con colonne più larghe. */}
+      {formatFilter !== "all" ? (
+        <div className={`mx-auto grid gap-3 md:gap-4 max-w-7xl ${formatFilter === "landscape" ? "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3" : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"}`}>
+          {renderTiles(filtered)}
+        </div>
+      ) : (
+        <>
+          {portraitItems.length > 0 && (
+            <section aria-label={t("ui.posterShapePortrait")}>
+              <div className="mx-auto max-w-7xl px-4 mb-2 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-zinc-200">{t("ui.posterShapePortrait")}</h2>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-muted tabular-nums">{portraitItems.length}</span>
+              </div>
+              <div className="mx-auto grid gap-3 md:gap-4 max-w-7xl grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {renderTiles(portraitItems)}
+              </div>
+            </section>
+          )}
+          {landscapeItems.length > 0 && (
+            <section aria-label={t("ui.posterShapeLandscape")} className="mt-6">
+              <div className="mx-auto max-w-7xl px-4 mb-2 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-zinc-200">{t("ui.posterShapeLandscape")}</h2>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-muted tabular-nums">{landscapeItems.length}</span>
+              </div>
+              <div className="mx-auto grid gap-3 md:gap-4 max-w-7xl grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                {renderTiles(landscapeItems)}
+              </div>
+            </section>
+          )}
+        </>
+      )}
       <PosterLightbox
         lightbox={lightbox}
         onClose={() => setLightbox(null)}

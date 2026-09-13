@@ -1,5 +1,12 @@
 import type { BadgeStyle, RankingBadgeStyle } from "./badge-styles"
 
+/** Formato canvas del poster: verticale standard o orizzontale 16:9 (Nuvio). */
+export type PosterShape = "poster" | "landscape"
+
+export function isPosterShape(value: unknown): value is PosterShape {
+  return value === "poster" || value === "landscape"
+}
+
 export interface SearchResult {
   id: number
   media_type: "movie" | "tv"
@@ -121,8 +128,25 @@ export interface Mapping {
   cleanPosterIndex?: number | null
   cleanPosterUpdatedAt?: string | null
   autoRotateClean?: boolean | null
+  /** Rotazione 24h degli sfondi landscape (mirror dei clean poster): lista
+   *  candidati, indice corrente, timestamp ultima rotazione, flag auto,
+   *  esclusioni permanenti. Indipendente dalla rotazione verticale. */
+  cleanBackdrops?: string[] | null
+  cleanBackdropIndex?: number | null
+  cleanBackdropUpdatedAt?: string | null
+  autoRotateBackdrop?: boolean | null
+  excludedBackdrops?: string[] | null
   networkLogo?: boolean | null
   ribbonSide?: "left" | "right" | null
+  /** Formato canvas per-titolo: "landscape" = 16:9 da backdrop TMDB. Default portrait. */
+  posterShape?: PosterShape | null
+  /**
+   * Tuning di resa specifico per il canvas landscape 16:9 (profilo
+   * orizzontale). I campi flat restano il profilo verticale E il fallback
+   * per ogni chiave landscape assente/null. I mapping senza `landscape` si
+   * comportano esattamente come prima (backward compatible).
+   */
+  landscape?: LandscapeSettings | null
   /** Logo	path TMDB del network/produttore (es. /8AcaW...png) — usato come fallback quando non c'è SVG locale. */
   networkLogoPath?: string | null
   networkLogoName?: string | null
@@ -133,6 +157,69 @@ export interface Mapping {
   bestFitScore?: number | null
   bestFitReasons?: string[] | null
   episodeGroupId?: string | null
+}
+
+/**
+ * Parametri di resa con tuning separato per formato canvas. Sottoinsieme dei
+ * campi di Mapping: solo quelli di tuning visivo (logo, badge, gradienti,
+ * blur). Stili, toggle, metadati condivisi (titolo, rating, generi, date) e
+ * base (posterPath/backdropPath) restano unici per titolo.
+ */
+export interface LandscapeSettings {
+  logoScale?: number | null
+  logoOffsetX?: number | null
+  logoOffsetY?: number | null
+  topBadgeScale?: number | null
+  topBadgeOffsetX?: number | null
+  topBadgeOffsetY?: number | null
+  genreBadgeScale?: number | null
+  genreBadgeOffsetX?: number | null
+  genreBadgeOffsetY?: number | null
+  qualityBadgeScale?: number | null
+  qualityBadgeOffsetX?: number | null
+  qualityBadgeOffsetY?: number | null
+  networkLogoScale?: number | null
+  networkLogoOffsetX?: number | null
+  networkLogoOffsetY?: number | null
+  gradientHeight?: number | null
+  blurEnabled?: boolean | null
+  blurIntensity?: number | null
+  blurFade?: number | null
+  blurDarkness?: number | null
+}
+
+/**
+ * Mapping effettivo per il formato richiesto: in landscape i valori non-null
+ * di `mapping.landscape` vincono sui campi flat, che restano il fallback
+ * chiave-per-chiave. Ritorna lo stesso oggetto quando non c'è overlay da
+ * applicare (shape portrait o nessun profilo landscape salvato).
+ */
+export function effectiveMappingForShape(mapping: Mapping | null, shape: PosterShape): Mapping | null {
+  if (!mapping || shape !== "landscape" || !mapping.landscape) return mapping
+  const l = mapping.landscape
+  return {
+    ...mapping,
+    logoScale: l.logoScale ?? mapping.logoScale,
+    logoOffsetX: l.logoOffsetX ?? mapping.logoOffsetX,
+    logoOffsetY: l.logoOffsetY ?? mapping.logoOffsetY,
+    topBadgeScale: l.topBadgeScale ?? mapping.topBadgeScale,
+    topBadgeOffsetX: l.topBadgeOffsetX ?? mapping.topBadgeOffsetX,
+    topBadgeOffsetY: l.topBadgeOffsetY ?? mapping.topBadgeOffsetY,
+    genreBadgeScale: l.genreBadgeScale ?? mapping.genreBadgeScale,
+    genreBadgeOffsetX: l.genreBadgeOffsetX ?? mapping.genreBadgeOffsetX,
+    genreBadgeOffsetY: l.genreBadgeOffsetY ?? mapping.genreBadgeOffsetY,
+    qualityBadgeScale: l.qualityBadgeScale ?? mapping.qualityBadgeScale,
+    qualityBadgeOffsetX: l.qualityBadgeOffsetX ?? mapping.qualityBadgeOffsetX,
+    qualityBadgeOffsetY: l.qualityBadgeOffsetY ?? mapping.qualityBadgeOffsetY,
+    networkLogoScale: l.networkLogoScale ?? mapping.networkLogoScale,
+    networkLogoOffsetX: l.networkLogoOffsetX ?? mapping.networkLogoOffsetX,
+    networkLogoOffsetY: l.networkLogoOffsetY ?? mapping.networkLogoOffsetY,
+    gradientHeight: l.gradientHeight ?? mapping.gradientHeight,
+    blurEnabled: l.blurEnabled ?? mapping.blurEnabled,
+    blurIntensity: l.blurIntensity ?? mapping.blurIntensity,
+    blurFade: l.blurFade ?? mapping.blurFade,
+    blurDarkness: l.blurDarkness ?? mapping.blurDarkness,
+  }
 }
 
 export type CustomCatalogType = "movie" | "series" | "mixed"

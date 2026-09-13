@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useContext, useState, useMemo, useCallback } from "react"
-import type { TMDBImage } from "@/lib/types"
+import type { TMDBImage, PosterShape } from "@/lib/types"
 import { useDefaults } from "@/lib/useDefaults"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
 
@@ -45,6 +45,12 @@ export interface PosterEditorCtx {
   setPreRelease: (v: boolean | ((prev: boolean) => boolean)) => void
   ribbonSide: "left" | "right"
   setRibbonSide: (v: "left" | "right" | ((prev: "left" | "right") => "left" | "right")) => void
+  /** Allineamento blocco logo/metadati del poster in editing. */
+  logoAlign: "left" | "center"
+  setLogoAlign: (v: "left" | "center" | ((prev: "left" | "center") => "left" | "center")) => void
+  /** Formato canvas del poster in editing (switch per-titolo in EditView). */
+  posterShape: PosterShape
+  setPosterShape: (v: PosterShape | ((prev: PosterShape) => PosterShape)) => void
   episodeMetadataSource: "tmdb" | "tvdb"
   setEpisodeMetadataSource: (v: "tmdb" | "tvdb" | ((prev: "tmdb" | "tvdb") => "tmdb" | "tvdb")) => void
   region: string
@@ -114,14 +120,25 @@ export interface PosterEditorCtx {
   setDefaultRatingSources: (v: string[] | ((prev: string[]) => string[])) => void
   defaultAutoRotateClean: boolean
   setDefaultAutoRotateClean: (v: boolean | ((prev: boolean) => boolean)) => void
-  defaultLogoFitEnabled: boolean
-  setDefaultLogoFitEnabled: (v: boolean | ((prev: boolean) => boolean)) => void
+  defaultAutoRotateBackdrop: boolean
+  setDefaultAutoRotateBackdrop: (v: boolean | ((prev: boolean) => boolean)) => void
+  /** Best-fit automatico per formato (sdoppiato dal vecchio flag unico). */
+  defaultPortraitFitEnabled: boolean
+  setDefaultPortraitFitEnabled: (v: boolean | ((prev: boolean) => boolean)) => void
+  defaultLandscapeFitEnabled: boolean
+  setDefaultLandscapeFitEnabled: (v: boolean | ((prev: boolean) => boolean)) => void
   defaultNetworkLogo: boolean
   setDefaultNetworkLogo: (v: boolean | ((prev: boolean) => boolean)) => void
   defaultPreRelease: boolean
   setDefaultPreRelease: (v: boolean | ((prev: boolean) => boolean)) => void
   defaultRibbonSide: "left" | "right"
   setDefaultRibbonSide: (v: "left" | "right" | ((prev: "left" | "right") => "left" | "right")) => void
+  /** Allineamento di default (null = default di formato). */
+  defaultLogoAlign: "left" | "center" | null
+  setDefaultLogoAlign: (v: "left" | "center" | null | ((prev: "left" | "center" | null) => "left" | "center" | null)) => void
+  /** Formato canvas di default (Impostazioni globali). */
+  defaultPosterShape: PosterShape
+  setDefaultPosterShape: (v: PosterShape | ((prev: PosterShape) => PosterShape)) => void
   defaultRegion: string
   setDefaultRegion: (v: string | ((prev: string) => string)) => void
   loadDefaultsToState: () => void
@@ -200,6 +217,13 @@ export interface PosterEditorCtx {
   setAutoRotateClean: (v: boolean | ((prev: boolean) => boolean)) => void
   excludedPosters: string[]
   setExcludedPosters: (v: string[] | ((prev: string[]) => string[])) => void
+  /** Rotazione 24h sfondi landscape (mirror verticale, stato per-titolo). */
+  rotationBackdrops: string[]
+  setRotationBackdrops: (v: string[] | ((prev: string[]) => string[])) => void
+  autoRotateBackdrop: boolean
+  setAutoRotateBackdrop: (v: boolean | ((prev: boolean) => boolean)) => void
+  excludedBackdrops: string[]
+  setExcludedBackdrops: (v: string[] | ((prev: string[]) => string[])) => void
 
   // ---- Episode Group (TV Series parts/seasons order) ----
   episodeGroupId: string | null
@@ -244,6 +268,9 @@ export function PosterEditorProvider({
   const [rotationPosters, setRotationPosters] = useState<string[]>([])
   const [autoRotateClean, setAutoRotateClean] = useState(false)
   const [excludedPosters, setExcludedPosters] = useState<string[]>([])
+  const [rotationBackdrops, setRotationBackdrops] = useState<string[]>([])
+  const [autoRotateBackdrop, setAutoRotateBackdrop] = useState(false)
+  const [excludedBackdrops, setExcludedBackdrops] = useState<string[]>([])
 
   // ---- Episode Group state ----
   const [episodeGroupId, setEpisodeGroupId] = useState<string | null>(null)
@@ -252,7 +279,7 @@ export function PosterEditorProvider({
   const [customBadge, setCustomBadge] = useState<string | null>(null)
 
   const {
-    globalBadges, rankingBadges, networkLogo, preRelease, ribbonSide,
+    globalBadges, rankingBadges, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
     badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources,
     gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
@@ -268,7 +295,7 @@ export function PosterEditorProvider({
     defaultGenreBadgeOffsetX, defaultGenreBadgeOffsetY, defaultQualityBadgeOffsetX, defaultQualityBadgeOffsetY,
     defaultNetworkLogoOffsetX, defaultNetworkLogoOffsetY,
     defaultBadgeGenre, defaultBadgeYear, defaultBadgeRating, defaultBadgeQuality, defaultCustomRatings, defaultCustomRatingEndpoint, defaultCustomRatingApiKeyHeader, defaultRatingSources,
-    defaultAutoRotateClean, defaultLogoFitEnabled, defaultNetworkLogo, defaultPreRelease, defaultRibbonSide,
+    defaultAutoRotateClean, defaultAutoRotateBackdrop, defaultPortraitFitEnabled, defaultLandscapeFitEnabled, defaultNetworkLogo, defaultPreRelease, defaultRibbonSide, defaultPosterShape, defaultLogoAlign,
     episodeMetadataSource, defaultEpisodeMetadataSource,
     region, defaultRegion,
     loadDefaultsToState, update,
@@ -329,6 +356,14 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(ribbonSide) : v
       update({ ribbonSide: next })
     }, [ribbonSide, update])
+  const setPosterShape = useCallback(
+    (v: PosterShape | ((prev: PosterShape) => PosterShape)) => {
+      const next = typeof v === "function" ? v(posterShape) : v
+      update({
+        posterShape: next,
+        logoAlign: next === "landscape" ? (defaultLogoAlign ?? "left") : "center",
+      })
+    }, [posterShape, update, defaultLogoAlign])
   // Regola di split corrente/default (vale per TUTTI i setter di questo file):
   // i setter dell'editor (setX) scrivono solo il valore corrente del poster
   // aperto, i setter delle Impostazioni (setDefaultX) solo il default globale.
@@ -581,11 +616,21 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(defaultAutoRotateClean) : v
       update({ defaultAutoRotateClean: next })
     }, [defaultAutoRotateClean, update])
-  const setDefaultLogoFitEnabled = useCallback(
+  const setDefaultAutoRotateBackdrop = useCallback(
     (v: boolean | ((prev: boolean) => boolean)) => {
-      const next = typeof v === "function" ? v(defaultLogoFitEnabled) : v
-      update({ defaultLogoFitEnabled: next })
-    }, [defaultLogoFitEnabled, update])
+      const next = typeof v === "function" ? v(defaultAutoRotateBackdrop) : v
+      update({ defaultAutoRotateBackdrop: next })
+    }, [defaultAutoRotateBackdrop, update])
+  const setDefaultPortraitFitEnabled = useCallback(
+    (v: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof v === "function" ? v(defaultPortraitFitEnabled) : v
+      update({ defaultPortraitFitEnabled: next })
+    }, [defaultPortraitFitEnabled, update])
+  const setDefaultLandscapeFitEnabled = useCallback(
+    (v: boolean | ((prev: boolean) => boolean)) => {
+      const next = typeof v === "function" ? v(defaultLandscapeFitEnabled) : v
+      update({ defaultLandscapeFitEnabled: next })
+    }, [defaultLandscapeFitEnabled, update])
   const setDefaultNetworkLogo = useCallback(
     (v: boolean | ((prev: boolean) => boolean)) => {
       const next = typeof v === "function" ? v(defaultNetworkLogo) : v
@@ -601,6 +646,21 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(defaultRibbonSide) : v
       update({ defaultRibbonSide: next })
     }, [defaultRibbonSide, update])
+  const setDefaultPosterShape = useCallback(
+    (v: PosterShape | ((prev: PosterShape) => PosterShape)) => {
+      const next = typeof v === "function" ? v(defaultPosterShape) : v
+      update({ defaultPosterShape: next })
+    }, [defaultPosterShape, update])
+  const setLogoAlign = useCallback(
+    (v: "left" | "center" | ((prev: "left" | "center") => "left" | "center")) => {
+      const next = typeof v === "function" ? v(logoAlign) : v
+      update({ logoAlign: next })
+    }, [logoAlign, update])
+  const setDefaultLogoAlign = useCallback(
+    (v: "left" | "center" | null | ((prev: "left" | "center" | null) => "left" | "center" | null)) => {
+      const next = typeof v === "function" ? v(defaultLogoAlign) : v
+      update({ defaultLogoAlign: next })
+    }, [defaultLogoAlign, update])
   const setEpisodeMetadataSource = useCallback(
     (v: "tmdb" | "tvdb" | ((prev: "tmdb" | "tvdb") => "tmdb" | "tvdb")) => {
       const next = typeof v === "function" ? v(episodeMetadataSource) : v
@@ -653,6 +713,10 @@ export function PosterEditorProvider({
       setPreRelease,
       ribbonSide,
       setRibbonSide,
+      posterShape,
+      setPosterShape,
+      logoAlign,
+      setLogoAlign,
       episodeMetadataSource,
       setEpisodeMetadataSource,
       region,
@@ -721,14 +785,22 @@ export function PosterEditorProvider({
       setDefaultRatingSources,
       defaultAutoRotateClean,
       setDefaultAutoRotateClean,
-      defaultLogoFitEnabled,
-      setDefaultLogoFitEnabled,
+      defaultAutoRotateBackdrop,
+      setDefaultAutoRotateBackdrop,
+      defaultPortraitFitEnabled,
+      setDefaultPortraitFitEnabled,
+      defaultLandscapeFitEnabled,
+      setDefaultLandscapeFitEnabled,
       defaultNetworkLogo,
       setDefaultNetworkLogo,
       defaultPreRelease,
       setDefaultPreRelease,
       defaultRibbonSide,
       setDefaultRibbonSide,
+      defaultPosterShape,
+      setDefaultPosterShape,
+      defaultLogoAlign,
+      setDefaultLogoAlign,
       defaultRegion,
       setDefaultRegion,
       loadDefaultsToState,
@@ -808,6 +880,12 @@ export function PosterEditorProvider({
       setAutoRotateClean,
       excludedPosters,
       setExcludedPosters,
+      rotationBackdrops,
+      setRotationBackdrops,
+      autoRotateBackdrop,
+      setAutoRotateBackdrop,
+      excludedBackdrops,
+      setExcludedBackdrops,
 
       // Episode Group
       episodeGroupId,
@@ -829,6 +907,8 @@ export function PosterEditorProvider({
       networkLogo, setNetworkLogo,
       preRelease, setPreRelease,
       ribbonSide, setRibbonSide,
+      posterShape, setPosterShape,
+      logoAlign, setLogoAlign,
       episodeMetadataSource, setEpisodeMetadataSource,
       region, setRegion,
       defaultRegion, setDefaultRegion,
@@ -874,10 +954,14 @@ export function PosterEditorProvider({
       defaultCustomRatingApiKeyHeader, setDefaultCustomRatingApiKeyHeader,
       defaultRatingSources, setDefaultRatingSources,
       defaultAutoRotateClean, setDefaultAutoRotateClean,
-      defaultLogoFitEnabled, setDefaultLogoFitEnabled,
+      defaultAutoRotateBackdrop, setDefaultAutoRotateBackdrop,
+      defaultPortraitFitEnabled, setDefaultPortraitFitEnabled,
+      defaultLandscapeFitEnabled, setDefaultLandscapeFitEnabled,
       defaultNetworkLogo, setDefaultNetworkLogo,
       defaultPreRelease, setDefaultPreRelease,
       defaultRibbonSide, setDefaultRibbonSide,
+      defaultPosterShape, setDefaultPosterShape,
+      defaultLogoAlign, setDefaultLogoAlign,
       loadDefaultsToState,
 
       // Blur
@@ -926,6 +1010,9 @@ export function PosterEditorProvider({
       rotationPosters, setRotationPosters,
       autoRotateClean, setAutoRotateClean,
       excludedPosters, setExcludedPosters,
+      rotationBackdrops, setRotationBackdrops,
+      autoRotateBackdrop, setAutoRotateBackdrop,
+      excludedBackdrops, setExcludedBackdrops,
 
       // Episode Group
       episodeGroupId, setEpisodeGroupId,

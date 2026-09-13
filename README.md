@@ -67,6 +67,13 @@ pinned: false
   <em>Effetto Pre-Digitale: velo scuro + nastro "Coming Soon" sui film non ancora in streaming</em>
 </div>
 
+<div align="center" style="margin-top: 12px;">
+  <img src="https://raw.githubusercontent.com/Eful97/Pictorium/master/public/Screen/landscape-editor.png" alt="Editor orizzontale 16:9" width="100%" style="border-radius: 8px; margin-bottom: 8px;" />
+  <img src="https://raw.githubusercontent.com/Eful97/Pictorium/master/public/Screen/1325734.jpg" alt="Poster orizzontale 16:9" width="100%" style="border-radius: 8px;" />
+  <br />
+  <em>🧪 Poster orizzontali 16:9 (BETA): editor dedicato e output stile Nuvio dal backdrop TMDB</em>
+</div>
+
 ---
 
 ## ⚡ Caratteristiche Principali
@@ -81,6 +88,7 @@ pinned: false
 | 🌍 **Interfaccia Multilingua Dinamica** | Interfaccia localizzata (Italiano, English, Français, Deutsch, Español, Português, 日本語, 한국어) con cambio lingua istantaneo in tempo reale senza ricaricare la pagina. |
 | 🔒 **Protezione con PIN & Sicurezza** | Protezione ad ogni avvio e ricaricamento (F5) per l'editor, configurabile subito nel wizard iniziale (Step 3) o nelle Impostazioni. Locandine, manifest e cataloghi per Stremio restano 100% aperti e sempre funzionanti. |
 | ⚡ **Zero Conflitti di Cache** | Versioning deterministico con `RENDER_VERSION` e `APP_VERSION` automatiche. Se cambi uno stile, Stremio aggiorna istantaneamente le immagini. |
+| 🖥️ **Poster Orizzontali 16:9 (BETA)** | Sfondi TMDB in stile Nuvio con tuning separato per formato, best-fit Cinematic Left e rotazione 24h dedicata. Vedi sotto. |
 
 ---
 
@@ -92,6 +100,16 @@ pinned: false
 * **Sfocatura Sfondo (Sharp C++)**: Generazione di sfondi blur cinematografici ultra-rapidi (10–20ms) a basso consumo di RAM.
 * **Rotazione Automatica 24h**: Alterna automaticamente ogni giorno più poster salvati per lo stesso titolo.
 * **Loghi Network Ufficiali**: Riconoscimento ed embedding automatico per Netflix, Prime Video, Disney+, Apple TV+, HBO Max, Paramount+, Sky/NOW, Crunchyroll, Rai, Mediaset e oltre 30 studi (Marvel, Pixar, Ghibli, Warner Bros, A24).
+
+### 🖥️ Poster Orizzontali 16:9 (BETA)
+
+I titoli possono avere un secondo formato orizzontale in stile Nuvio, generato dal backdrop TMDB (`w780`; se manca, fallback pillarbox dal poster — mai riquadri rotti):
+
+* **Tuning separato per formato**: logo, badge, blur e gradiente hanno un profilo verticale e uno orizzontale indipendenti — ottimizzare un formato non sposta l'altro (merge conservativo al salvataggio).
+* **Best-Fit Cinematic Left**: analisi compatibilità logo calibrata sul canvas 768×432 con logo ancorato a sinistra, ordinamento TMDB/Best Fit e auto-selezione del miglior sfondo.
+* **Rotazione 24h sfondi**: lista candidati, esclusioni permanenti con ripristino e toggle per-titolo, come i poster verticali (stato indipendente).
+* **Badge genere/voto solo default**: in orizzontale vale solo lo stile *shadow* (gli altri restano disponibili in verticale).
+* **Libreria a sezioni separate**: "I Miei Poster" mostra verticali e orizzontali in due sezioni con filtro formato e cambio formato rapido dalla card.
 
 ### 🏷️ Badge, Rating & Riconoscimenti
 * **✨ Qualità Streaming (4K / FHD / HD / SD)**: Rilevata in tempo reale dai flussi di Stremio con fallback automatico su JustWatch.

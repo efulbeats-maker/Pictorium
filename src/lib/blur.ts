@@ -8,6 +8,9 @@ export interface BlurParams {
   blurIntensity: number
   blurFade: number
   blurDarkness: number
+  /** Dimensioni canvas (default STD portrait; ramo landscape passa LAND_*). */
+  canvasW?: number
+  canvasH?: number
 }
 
 /**
@@ -52,17 +55,19 @@ export interface BlurOverlay {
 export async function applyBlur(params: BlurParams): Promise<BlurOverlay | null> {
   const { posterBuf, blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness } = params
   if (!blurEnabled) return null
+  const canvasW = params.canvasW ?? STD_W
+  const canvasH = params.canvasH ?? STD_H
 
-  const gh = Math.min(Math.max(Math.round(STD_H * blurHeight / 100), 100), STD_H)
-  const gradTop = STD_H - gh
+  const gh = Math.min(Math.max(Math.round(canvasH * blurHeight / 100), 100), canvasH)
+  const gradTop = canvasH - gh
   const fadedPct = Math.min(Math.max(blurFade, 0), 100)
   const darkAlpha = Math.min(blurDarkness / 100, 1)
   const fadeStop = fadedPct / 100
 
   // Step 1: extract bottom region, blur it, read raw pixels directly (C++, no PNG intermediate)
   const { data: blurPx } = await sharp(posterBuf)
-    .extract({ left: 0, top: gradTop, width: STD_W, height: gh })
-    .resize(STD_W, gh, { fit: "fill" })
+    .extract({ left: 0, top: gradTop, width: canvasW, height: gh })
+    .resize(canvasW, gh, { fit: "fill" })
     .blur(blurIntensity)
     .removeAlpha()
     .raw()
@@ -70,15 +75,15 @@ export async function applyBlur(params: BlurParams): Promise<BlurOverlay | null>
 
   // Step 2: build RGBA overlay buffer
   //   RGB = blur × shade (darken by y), A = fade × 255 (opacity by y)
-  const overlay = Buffer.alloc(gh * STD_W * 4)
+  const overlay = Buffer.alloc(gh * canvasW * 4)
   for (let y = 0; y < gh; y++) {
     const yPct = gh <= 1 ? 1 : y / (gh - 1)
     const fade = fadeStop <= 0 ? 1 : Math.min(yPct / fadeStop, 1)
     const shade = 1 - darkAlpha * fade
     const alpha = Math.round(fade * 255)
-    for (let x = 0; x < STD_W; x++) {
-      const si = (y * STD_W + x) * 3
-      const di = (y * STD_W + x) * 4
+    for (let x = 0; x < canvasW; x++) {
+      const si = (y * canvasW + x) * 3
+      const di = (y * canvasW + x) * 4
       overlay[di] = Math.round(blurPx[si] * shade)
       overlay[di + 1] = Math.round(blurPx[si + 1] * shade)
       overlay[di + 2] = Math.round(blurPx[si + 2] * shade)

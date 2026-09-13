@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest"
 import sharp from "sharp"
-import { selectBestLogoFitPosterPath, clearAutoFitCache } from "@/lib/poster-auto-fit"
+import { selectAutoFitCandidates, selectBestLogoFitPosterPath, clearAutoFitCache } from "@/lib/poster-auto-fit"
 
 async function solidPoster(color: string, w = 500, h = 750): Promise<Buffer> {
   return sharp({
@@ -578,6 +578,52 @@ describe("selectBestLogoFitPosterPath", () => {
       hasBadges: true,
     })
 
+    expect(selected?.posterPath).toBe("/dark.jpg")
+  })
+})
+
+describe("selectAutoFitCandidates shape", () => {
+  const portrait = { file_path: "/p.jpg", iso_639_1: null, width: 500, height: 750 }
+  const landscape = { file_path: "/b.jpg", iso_639_1: null, width: 1280, height: 720 }
+  const unknown = { file_path: "/u.jpg", iso_639_1: null }
+  const lang = { file_path: "/it.jpg", iso_639_1: "it", width: 1280, height: 720 }
+
+  it("portrait keeps 2:3 and drops 16:9", () => {
+    const out = selectAutoFitCandidates([portrait, landscape, unknown], "poster")
+    expect(out.map((p) => p.file_path).sort()).toEqual(["/p.jpg", "/u.jpg"])
+  })
+
+  it("landscape keeps 16:9 and drops 2:3", () => {
+    const out = selectAutoFitCandidates([portrait, landscape, unknown], "landscape")
+    expect(out.map((p) => p.file_path).sort()).toEqual(["/b.jpg", "/u.jpg"])
+  })
+
+  it("always drops non-clean candidates", () => {
+    expect(selectAutoFitCandidates([lang], "landscape")).toEqual([])
+  })
+
+  it("landscape end-to-end: picks the dark backdrop for a white logo", async () => {
+    const darkBackdrop = await solidPoster("#050505", 1280, 720)
+    const lightBackdrop = await solidPoster("#f8f8f8", 1280, 720)
+    const logo = await solidLogo("#ffffff")
+    const images = new Map([
+      ["/dark.jpg", darkBackdrop],
+      ["/light.jpg", lightBackdrop],
+      ["/logo.png", logo],
+    ])
+    const selected = await selectBestLogoFitPosterPath({
+      posters: [
+        { file_path: "/light.jpg", iso_639_1: null, width: 1280, height: 720 },
+        { file_path: "/dark.jpg", iso_639_1: null, width: 1280, height: 720 },
+      ],
+      logoPath: "/logo.png",
+      fetchImage: makeImages(images),
+      logoScale: 50,
+      logoOffsetX: 0,
+      logoOffsetY: 0,
+      hasBadges: true,
+      shape: "landscape",
+    })
     expect(selected?.posterPath).toBe("/dark.jpg")
   })
 })

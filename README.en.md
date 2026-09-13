@@ -67,6 +67,13 @@ pinned: false
   <em>Pre-Digital Effect: dark veil + "Coming Soon" ribbon on movies not yet streaming</em>
 </div>
 
+<div align="center" style="margin-top: 12px;">
+  <img src="https://raw.githubusercontent.com/Eful97/Pictorium/master/public/Screen/landscape-editor.png" alt="16:9 landscape editor" width="100%" style="border-radius: 8px; margin-bottom: 8px;" />
+  <img src="https://raw.githubusercontent.com/Eful97/Pictorium/master/public/Screen/1325734.jpg" alt="16:9 landscape poster" width="100%" style="border-radius: 8px;" />
+  <br />
+  <em>🧪 16:9 landscape posters (BETA): dedicated editor and Nuvio-style output from the TMDB backdrop</em>
+</div>
+
 ---
 
 ## ⚡ Key Features
@@ -81,6 +88,7 @@ pinned: false
 | 🌍 **Dynamic Multilingual UI** | Fully localized interface (Italian, English, French, German, Spanish, Portuguese, Japanese, Korean) with instant real-time language switching without page refresh. |
 | 🔒 **PIN Protection & Security** | Lock screen protection on every launch and page reload (F5) for the editor, configurable right during the initial setup wizard (Step 3) or in Settings. Stremio manifests and posters remain 100% open and unaffected. |
 | ⚡ **Zero Cache Conflicts** | Deterministic versioning with automated `RENDER_VERSION` and `APP_VERSION`. Change any styling parameter and Stremio updates cached images immediately. |
+| 🖥️ **16:9 Landscape Posters (BETA)** | Nuvio-style TMDB backdrops with per-format tuning, Cinematic Left best-fit and dedicated 24h rotation. See below. |
 
 ---
 
@@ -92,6 +100,16 @@ pinned: false
 * **Cinematic Background Blur (Sharp C++)**: Ultra-fast background blur generation (10–20ms) with minimal RAM usage.
 * **24h Auto-Rotation**: Automatically rotates through multiple saved clean posters daily for the same title.
 * **Official Network Logos**: Automatic detection and embedding for Netflix, Prime Video, Disney+, Apple TV+, HBO Max, Paramount+, Sky/NOW, Crunchyroll, and 30+ studios (Marvel, Pixar, Ghibli, Warner Bros, A24).
+
+### 🖥️ 16:9 Landscape Posters (BETA)
+
+Titles can have a second Nuvio-style landscape format generated from the TMDB backdrop (`w780`; pillarbox fallback from the poster when missing — never broken tiles):
+
+* **Per-format tuning**: logo, badges, blur and gradient have independent portrait and landscape profiles — tuning one format never moves the other (conservative merge on save).
+* **Cinematic Left best-fit**: logo-compatibility analysis calibrated on the 768×432 canvas with left-anchored logo, TMDB/Best Fit ordering and best-backdrop auto-select.
+* **24h backdrop rotation**: candidate list, permanent exclusions with restore and per-title toggle, like portrait posters (independent state).
+* **Default-only genre/rating badge**: landscape renders the *shadow* style only (other styles remain available in portrait).
+* **Split library sections**: "My Posters" shows portrait and landscape in two sections with format filter and quick shape flip from the card.
 
 ### 🏷️ Badges, Ratings & Accolades
 

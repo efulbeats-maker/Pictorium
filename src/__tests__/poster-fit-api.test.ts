@@ -180,6 +180,7 @@ describe("POST /api/poster-fit", () => {
   })
 
   it("sorts ranked by adjustedScore descending", async () => {
+
     const logoBuf = await makeLogoBuffer(255, 255, 255)
     const darkBuf = await makePosterBuffer(20, 20, 30)
     const lightBuf = await makePosterBuffer(230, 230, 240)
@@ -199,6 +200,35 @@ describe("POST /api/poster-fit", () => {
     expect(json.ranked).toHaveLength(2)
     expect(json.ranked[0].adjustedScore).toBeGreaterThanOrEqual(json.ranked[1].adjustedScore)
     expect(json.ranked[0].posterPath).toBe("/dark.jpg")
+  })
+
+  it("returns 400 for an invalid shape", async () => {
+    const req = mockNextRequest({ posterPaths: ["/test.jpg"], logoPath: "/logo.png", shape: "panorama" })
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+  })
+
+  it("landscape shape fetches candidates at w780 by default", async () => {
+    const posterBuf = await makePosterBuffer(20, 20, 30)
+    const logoBuf = await makeLogoBuffer(255, 255, 255)
+    const urls: string[] = []
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      urls.push(url)
+      if (url.includes("/logo")) return new Response(new Uint8Array(logoBuf))
+      return new Response(new Uint8Array(posterBuf))
+    }))
+
+    const req = mockNextRequest({
+      posterPaths: ["/test.jpg"],
+      logoPath: "/logo.png",
+      shape: "landscape",
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(200)
+    const posterUrl = urls.find((u) => u.includes("test.jpg"))
+    expect(posterUrl).toBe("https://image.tmdb.org/t/p/w780/test.jpg")
+    const json = await res.json()
+    expect(json.ranked).toHaveLength(1)
   })
 })
 

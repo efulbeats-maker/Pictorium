@@ -45,6 +45,25 @@ export function cinematicVignetteSVG(pw: number, ph: number): string {
 }
 
 /**
+ * Scrim d'angolo per il layout landscape "Cinematic Left": gradiente radiale
+ * concentrato in basso a sinistra (logo + metadati), destra limpida.
+ * Sostituisce la fascia blur/gradiente bassa quando non esplicitata.
+ */
+export function cinematicCornerGradientSVG(pw: number, ph: number): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${pw}" height="${ph}">
+  <defs>
+    <radialGradient id="cornerGrad" cx="0%" cy="100%" r="85%" fx="0%" fy="100%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0.82"/>
+      <stop offset="45%" stop-color="#000000" stop-opacity="0.55"/>
+      <stop offset="75%" stop-color="#000000" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="${pw}" height="${ph}" fill="url(#cornerGrad)"/>
+</svg>`
+}
+
+/**
  * Colore d'accento per nome di genere. La chiave è il nome COME LO RESTITUISCE
  * TMDB nella lingua richiesta, quindi ogni lingua supportata va elencata: una
  * chiave mancante non è un errore visibile, degrada a #555555 (grigio) sia sul

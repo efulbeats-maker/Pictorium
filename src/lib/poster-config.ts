@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import type { PictoriumUserConfig } from "./config-token"
-import type { Mapping } from "./types"
+import { effectiveMappingForShape, type Mapping, type PosterShape } from "./types"
 import type { ServerDefaults } from "./server-defaults"
 import { resolveLabelFor } from "./i18n"
 import { SUPPORTED_RATING_SOURCES, DEFAULT_RATING_SOURCES } from "./ratings"
@@ -21,6 +21,28 @@ import {
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max)
+}
+
+/**
+ * Formato canvas — precedenza: query `shape` > mapping salvato >
+ * config token > server defaults > "poster". Solo "landscape" attiva il
+ * ramo 16:9 (base = backdrop TMDB); qualsiasi altro valore → portrait.
+ * Usato dalla route PRIMA del fetch (serve a scegliere la base) e dentro
+ * resolvePosterRenderConfig per coerenza.
+ */
+export function resolvePosterShape(
+  searchParams: URLSearchParams,
+  mapping: Mapping | null,
+  configOverride: PictoriumUserConfig | null,
+  sd: ServerDefaults,
+): PosterShape {
+  const q = (searchParams.get("shape") || "").toLowerCase()
+  if (q === "landscape") return "landscape"
+  if (q === "poster") return "poster"
+  if (mapping?.posterShape === "landscape" || mapping?.posterShape === "poster") return mapping.posterShape
+  if (configOverride?.posterShape === "landscape" || configOverride?.posterShape === "poster") return configOverride.posterShape
+  if (sd.posterShape === "landscape" || sd.posterShape === "poster") return sd.posterShape
+  return "poster"
 }
 
 export interface PosterRenderConfigInput {
@@ -86,6 +108,14 @@ export interface PosterRenderConfig {
   ribbonSide: "left" | "right"
   /** Stato pre-digitale (darken + badge Coming Soon, solo film). Default OFF. */
   preRelease: boolean
+  /** Formato canvas (query `shape` > mapping > config > defaults > "poster"). */
+  posterShape: PosterShape
+  /**
+   * Allineamento blocco logo/metadati — precedenza: query `align` > server
+   * defaults > default di formato (landscape "left", poster "center").
+   * Globale: nessun override per-titolo (il mapping non ha il campo).
+   */
+  logoAlign: "left" | "center"
 }
 
 export function resolvePosterRenderConfig(input: PosterRenderConfigInput): PosterRenderConfig {
@@ -113,37 +143,57 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     rankingBadgeStyle = "default"
   }
 
+  // Formato canvas presto: serve al default del gradiente sotto (20% in
+  // landscape per non annerire mezza scena). Stessa catena degli altri
+  // parametri — vedi resolvePosterShape.
+  const posterShape = resolvePosterShape(q, mapping, configOverride, sd)
+  // Profili per-formato (dual format My Posters): in landscape il tuning
+  // salvato in `mapping.landscape` vince sui campi flat chiave-per-chiave.
+  // La catena query > mapping > config > defaults sotto resta invariata.
+  const m = effectiveMappingForShape(mapping, posterShape)
+
+  // Allineamento Cinematic: vale SOLO in landscape (i portrait restano
+  // rigorosamente centrati per contratto — nessun parametro query o default
+  // globale deve mai spostarli a sinistra).
+  // In landscape: query `align=left|center` > server defaults > default "left".
+  const qAlign = (q.get("align") || "").toLowerCase()
+  const logoAlign: "left" | "center" = posterShape === "landscape"
+    ? (qAlign === "left" || qAlign === "center"
+        ? qAlign
+        : (sd.logoAlign === "left" || sd.logoAlign === "center" ? sd.logoAlign : "left"))
+    : "center"
+
   // Fix M3: includere i campi blur salvati nel mapping nella catena di fallback
   // (query > mapping > configOverride > default), come già fatto per badgeGenre/badgeStyle.
   // Prima il mapping salvato con blur custom non veniva mai applicato.
   const blurEnabled = q.get("be") !== null
     ? q.get("be") !== "0"
-    : (mapping?.blurEnabled != null ? mapping.blurEnabled : (configOverride !== null ? configOverride.blurEnabled : true))
+    : (m?.blurEnabled != null ? m.blurEnabled : (configOverride !== null ? configOverride.blurEnabled : true))
   // Clamp espliciti: impediscono a valori estremi (query o config) di arrivare a
   // sharp.blur con sigma enormi o gradienti fuori scala (potenziale DoS CPU).
   const rawGradHeight = q.get("gradHeight") ? Number(q.get("gradHeight")) : NaN
   const blurHeight = Number.isFinite(rawGradHeight)
     ? clamp(rawGradHeight, 5, 100)
-    : (mapping?.gradientHeight != null && Number.isFinite(mapping.gradientHeight)
-        ? clamp(mapping.gradientHeight, 5, 100)
-        : (configOverride !== null ? clamp(configOverride.gradientHeight, 5, 100) : 30))
+    : (m?.gradientHeight != null && Number.isFinite(m.gradientHeight)
+        ? clamp(m.gradientHeight, 5, 100)
+        : (configOverride !== null ? clamp(configOverride.gradientHeight, 5, 100) : (posterShape === "landscape" ? 20 : 30)))
   const rawBlur = q.get("blur") ? Number(q.get("blur")) : NaN
   const blurIntensity = Number.isFinite(rawBlur)
     ? clamp(rawBlur, 1, 100)
-    : (mapping?.blurIntensity != null && Number.isFinite(mapping.blurIntensity)
-        ? clamp(mapping.blurIntensity, 1, 100)
+    : (m?.blurIntensity != null && Number.isFinite(m.blurIntensity)
+        ? clamp(m.blurIntensity, 1, 100)
         : (configOverride !== null ? clamp(configOverride.blurIntensity, 1, 100) : 5))
   const rawBf = q.get("bf") ? Number(q.get("bf")) : NaN
   const blurFade = Number.isFinite(rawBf)
     ? clamp(rawBf, 0, 100)
-    : (mapping?.blurFade != null && Number.isFinite(mapping.blurFade)
-        ? clamp(mapping.blurFade, 0, 100)
+    : (m?.blurFade != null && Number.isFinite(m.blurFade)
+        ? clamp(m.blurFade, 0, 100)
         : (configOverride !== null ? clamp(configOverride.blurFade, 0, 100) : 60))
   const rawBd = q.get("bd") ? Number(q.get("bd")) : NaN
   const blurDarkness = Number.isFinite(rawBd)
     ? clamp(rawBd, 0, 100)
-    : (mapping?.blurDarkness != null && Number.isFinite(mapping.blurDarkness)
-        ? clamp(mapping.blurDarkness, 0, 100)
+    : (m?.blurDarkness != null && Number.isFinite(m.blurDarkness)
+        ? clamp(m.blurDarkness, 0, 100)
         : (configOverride !== null ? clamp(configOverride.blurDarkness, 0, 100) : 40))
 
   const qBadges = q.get("badges")
@@ -176,11 +226,16 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
 
   // Badge style — confinamento della query string al union type: valori non validi
   // cadono sul default (il renderer in passato li trattava come "shadow" nel ramo else).
+  // In landscape vale SOLO il default (shadow): gli altri stili sono disegnati
+  // per il 2:3 e sul 16:9 risultano osceni — per ora forzato, non rimosso
+  // (il contratto bs= resta valido in portrait).
   const rawBs = q.get("bs")
     || (mapping?.badgeStyle && mapping.badgeStyle !== "shadow" ? mapping.badgeStyle : undefined)
     || configOverride?.badgeStyle
     || sd.badgeStyle
-  const badgeStyle: BadgeStyle = isBadgeStyle(rawBs) ? rawBs : DEFAULT_BADGE_STYLE
+  const badgeStyle: BadgeStyle = posterShape === "landscape"
+    ? DEFAULT_BADGE_STYLE
+    : (isBadgeStyle(rawBs) ? rawBs : DEFAULT_BADGE_STYLE)
 
   const qScale = q.get("scale")
   const qOx = q.get("ox")
@@ -191,25 +246,25 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qScaleNum = qScale ? Number(qScale) : NaN
   const logoScale = qScale
     ? (Number.isFinite(qScaleNum) && qScaleNum !== 0 ? clamp(Math.round(qScaleNum), 10, 200) : null)
-    : mapping?.logoScale ?? null
+    : m?.logoScale ?? null
   // Offset: clamp ±2000px (oltre è comunque fuori canvas). A differenza di
   // prima, `ox=0` esplicito vince sul mapping (0 reale invece di null).
   const qOxNum = qOx ? Number(qOx) : NaN
   const logoOffsetX = qOx
     ? (Number.isFinite(qOxNum) ? clamp(Math.round(qOxNum), -2000, 2000) : null)
-    : mapping?.logoOffsetX ?? null
+    : m?.logoOffsetX ?? null
   const qOyNum = qOy ? Number(qOy) : NaN
   const logoOffsetY = qOy
     ? (Number.isFinite(qOyNum) ? clamp(Math.round(qOyNum), -2000, 2000) : null)
-    : mapping?.logoOffsetY ?? null
+    : m?.logoOffsetY ?? null
 
   // Badge superiore — stessa catena di blur/gradient (query > mapping > config
   // > server defaults > default), stessi bound del logo (scala %, offset px).
   const qTScaleNum = q.get("tscale") ? Number(q.get("tscale")) : NaN
   const topBadgeScale = q.get("tscale") !== null
     ? (Number.isFinite(qTScaleNum) && qTScaleNum !== 0 ? clamp(Math.round(qTScaleNum), 10, 200) : 100)
-    : (mapping?.topBadgeScale != null && Number.isFinite(mapping.topBadgeScale)
-        ? clamp(Math.round(mapping.topBadgeScale), 10, 200)
+    : (m?.topBadgeScale != null && Number.isFinite(m.topBadgeScale)
+        ? clamp(Math.round(m.topBadgeScale), 10, 200)
         : (configOverride?.topBadgeScale != null && Number.isFinite(configOverride.topBadgeScale)
             ? clamp(Math.round(configOverride.topBadgeScale), 10, 200)
             : (sd.topBadgeScale != null && Number.isFinite(sd.topBadgeScale)
@@ -218,19 +273,19 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qToxNum = q.get("tox") ? Number(q.get("tox")) : NaN
   const topBadgeOffsetX = q.get("tox") !== null
     ? (Number.isFinite(qToxNum) ? clamp(Math.round(qToxNum), -2000, 2000) : 0)
-    : (mapping?.topBadgeOffsetX ?? configOverride?.topBadgeOffsetX ?? sd.topBadgeOffsetX ?? 0)
+    : (m?.topBadgeOffsetX ?? configOverride?.topBadgeOffsetX ?? sd.topBadgeOffsetX ?? 0)
   const qToyNum = q.get("toy") ? Number(q.get("toy")) : NaN
   const topBadgeOffsetY = q.get("toy") !== null
     ? (Number.isFinite(qToyNum) ? clamp(Math.round(qToyNum), -2000, 2000) : 0)
-    : (mapping?.topBadgeOffsetY ?? configOverride?.topBadgeOffsetY ?? sd.topBadgeOffsetY ?? 0)
+    : (m?.topBadgeOffsetY ?? configOverride?.topBadgeOffsetY ?? sd.topBadgeOffsetY ?? 0)
 
   // Badge genere/rating in basso — stessa catena (query > mapping > config >
   // server defaults > default), stessi bound della scala (%, 10..200).
   const qGScaleNum = q.get("gscale") ? Number(q.get("gscale")) : NaN
   const genreBadgeScale = q.get("gscale") !== null
     ? (Number.isFinite(qGScaleNum) && qGScaleNum !== 0 ? clamp(Math.round(qGScaleNum), 10, 200) : 100)
-    : (mapping?.genreBadgeScale != null && Number.isFinite(mapping.genreBadgeScale)
-        ? clamp(Math.round(mapping.genreBadgeScale), 10, 200)
+    : (m?.genreBadgeScale != null && Number.isFinite(m.genreBadgeScale)
+        ? clamp(Math.round(m.genreBadgeScale), 10, 200)
         : (configOverride?.genreBadgeScale != null && Number.isFinite(configOverride.genreBadgeScale)
             ? clamp(Math.round(configOverride.genreBadgeScale), 10, 200)
             : (sd.genreBadgeScale != null && Number.isFinite(sd.genreBadgeScale)
@@ -241,18 +296,18 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qGoxNum = q.get("gox") ? Number(q.get("gox")) : NaN
   const genreBadgeOffsetX = q.get("gox") !== null
     ? (Number.isFinite(qGoxNum) ? clamp(Math.round(qGoxNum), -2000, 2000) : 0)
-    : (mapping?.genreBadgeOffsetX ?? configOverride?.genreBadgeOffsetX ?? sd.genreBadgeOffsetX ?? 0)
+    : (m?.genreBadgeOffsetX ?? configOverride?.genreBadgeOffsetX ?? sd.genreBadgeOffsetX ?? 0)
   const qGoyNum = q.get("goy") ? Number(q.get("goy")) : NaN
   const genreBadgeOffsetY = q.get("goy") !== null
     ? (Number.isFinite(qGoyNum) ? clamp(Math.round(qGoyNum), -2000, 2000) : 0)
-    : (mapping?.genreBadgeOffsetY ?? configOverride?.genreBadgeOffsetY ?? sd.genreBadgeOffsetY ?? 0)
+    : (m?.genreBadgeOffsetY ?? configOverride?.genreBadgeOffsetY ?? sd.genreBadgeOffsetY ?? 0)
 
   // Badge qualità streaming — stessa catena, stessi bound (%, 10..200).
   const qQScaleNum = q.get("qscale") ? Number(q.get("qscale")) : NaN
   const qualityBadgeScale = q.get("qscale") !== null
     ? (Number.isFinite(qQScaleNum) && qQScaleNum !== 0 ? clamp(Math.round(qQScaleNum), 10, 200) : 100)
-    : (mapping?.qualityBadgeScale != null && Number.isFinite(mapping.qualityBadgeScale)
-        ? clamp(Math.round(mapping.qualityBadgeScale), 10, 200)
+    : (m?.qualityBadgeScale != null && Number.isFinite(m.qualityBadgeScale)
+        ? clamp(Math.round(m.qualityBadgeScale), 10, 200)
         : (configOverride?.qualityBadgeScale != null && Number.isFinite(configOverride.qualityBadgeScale)
             ? clamp(Math.round(configOverride.qualityBadgeScale), 10, 200)
             : (sd.qualityBadgeScale != null && Number.isFinite(sd.qualityBadgeScale)
@@ -263,18 +318,18 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qQoxNum = q.get("qox") ? Number(q.get("qox")) : NaN
   const qualityBadgeOffsetX = q.get("qox") !== null
     ? (Number.isFinite(qQoxNum) ? clamp(Math.round(qQoxNum), -2000, 2000) : 0)
-    : (mapping?.qualityBadgeOffsetX ?? configOverride?.qualityBadgeOffsetX ?? sd.qualityBadgeOffsetX ?? 0)
+    : (m?.qualityBadgeOffsetX ?? configOverride?.qualityBadgeOffsetX ?? sd.qualityBadgeOffsetX ?? 0)
   const qQoyNum = q.get("qoy") ? Number(q.get("qoy")) : NaN
   const qualityBadgeOffsetY = q.get("qoy") !== null
     ? (Number.isFinite(qQoyNum) ? clamp(Math.round(qQoyNum), -2000, 2000) : 0)
-    : (mapping?.qualityBadgeOffsetY ?? configOverride?.qualityBadgeOffsetY ?? sd.qualityBadgeOffsetY ?? 0)
+    : (m?.qualityBadgeOffsetY ?? configOverride?.qualityBadgeOffsetY ?? sd.qualityBadgeOffsetY ?? 0)
 
   // Logo network — stessa catena, stessi bound (%, 10..200).
   const qNScaleNum = q.get("netscale") ? Number(q.get("netscale")) : NaN
   const networkLogoScale = q.get("netscale") !== null
     ? (Number.isFinite(qNScaleNum) && qNScaleNum !== 0 ? clamp(Math.round(qNScaleNum), 10, 200) : 100)
-    : (mapping?.networkLogoScale != null && Number.isFinite(mapping.networkLogoScale)
-        ? clamp(Math.round(mapping.networkLogoScale), 10, 200)
+    : (m?.networkLogoScale != null && Number.isFinite(m.networkLogoScale)
+        ? clamp(Math.round(m.networkLogoScale), 10, 200)
         : (configOverride?.networkLogoScale != null && Number.isFinite(configOverride.networkLogoScale)
             ? clamp(Math.round(configOverride.networkLogoScale), 10, 200)
             : (sd.networkLogoScale != null && Number.isFinite(sd.networkLogoScale)
@@ -285,11 +340,11 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qNoxNum = q.get("nox") ? Number(q.get("nox")) : NaN
   const networkLogoOffsetX = q.get("nox") !== null
     ? (Number.isFinite(qNoxNum) ? clamp(Math.round(qNoxNum), -2000, 2000) : 0)
-    : (mapping?.networkLogoOffsetX ?? configOverride?.networkLogoOffsetX ?? sd.networkLogoOffsetX ?? 0)
+    : (m?.networkLogoOffsetX ?? configOverride?.networkLogoOffsetX ?? sd.networkLogoOffsetX ?? 0)
   const qNoyNum = q.get("noy") ? Number(q.get("noy")) : NaN
   const networkLogoOffsetY = q.get("noy") !== null
     ? (Number.isFinite(qNoyNum) ? clamp(Math.round(qNoyNum), -2000, 2000) : 0)
-    : (mapping?.networkLogoOffsetY ?? configOverride?.networkLogoOffsetY ?? sd.networkLogoOffsetY ?? 0)
+    : (m?.networkLogoOffsetY ?? configOverride?.networkLogoOffsetY ?? sd.networkLogoOffsetY ?? 0)
 
   // Fix L32: le label prefissate (__badge.*) vengono risolte con la lingua
   // della richiesta — prima un customBadge "__badge.anime" dal config token
@@ -352,5 +407,7 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     networkLogo,
     ribbonSide,
     preRelease,
+    posterShape,
+    logoAlign,
   }
 }

@@ -243,6 +243,13 @@ describe("buildPreviewUrl", () => {
     expect(url).toContain("side=left")
   })
 
+  it("always emits shape in preview (portrait default, landscape on switch)", () => {
+    // Sempre esplicito come badges/cr: senza, un mapping salvato con shape
+    // diversa scavalcerebbe il toggle editor (desync WYSIWYG).
+    expect(buildPreviewUrl(basePosterState, baseBadgeParams)).toContain("shape=poster")
+    expect(buildPreviewUrl(basePosterState, { ...baseBadgeParams, posterShape: "landscape" })).toContain("shape=landscape")
+  })
+
   it("includes netLogo=0 when networkLogo is false", () => {
     const url = buildPreviewUrl(basePosterState, { ...baseBadgeParams, networkLogo: false })
     expect(url).toContain("netLogo=0")

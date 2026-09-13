@@ -84,6 +84,28 @@ describe("GET /catalog/[type]/[id]", () => {
     expect(body.metas[0].poster).toContain(`rv=${POSTER_URL_VERSION}`)
   })
 
+  it("serves a rendered landscape banner for Nuvio horizontal mode", async () => {
+    // Nuvio in modalità orizzontale carica `banner` (HomePosterCard:
+    // `banner ?: poster`), non `poster`: il banner deve puntare allo stesso
+    // rendering Pictorium in canvas landscape, altrimenti i poster spariscono
+    // e restano i backdrop TMDB grezzi.
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(justWatchResponse(94997, "tt11198330"))
+      .mockResolvedValueOnce(tmdbShowResponse(94997))
+
+    const req = new NextRequest("http://localhost:3000/catalog/series/pictorium-jw-series.json?api_key=settings-key")
+    const res = await GET(req, { params: Promise.resolve({ type: "series", id: "pictorium-jw-series.json" }) })
+    const body = await res.json()
+
+    expect(res.status).toBe(200)
+    expect(body.metas[0].banner).toContain("/api/poster/series/94997")
+    expect(body.metas[0].banner).toContain("shape=landscape")
+    expect(body.metas[0].banner).toContain(`rv=${POSTER_URL_VERSION}`)
+    // Il poster resta portrait per i client verticali (nessun mapping salvato).
+    expect(body.metas[0].poster).not.toContain("shape=landscape")
+    expect(body.metas[0].posterShape).toBe("poster")
+  })
+
   it("serves legacy posterium-* catalog IDs as aliases of pictorium-*", async () => {
     // Addon Stremio installati prima del rename chiedono ancora gli ID legacy:
     // devono rispondere come i canonici, senza duplicare la logica.

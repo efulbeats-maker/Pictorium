@@ -98,6 +98,14 @@ chiave d'istanza condivisa) resta valida per quel caso.
 
 ## Caching & risposte
 
+- Campi immagine per item: `poster` = rendering Pictorium (formato da
+  mapping/defaults), `banner` = SEMPRE rendering Pictorium in canvas landscape
+  (`forceShape` in `stremio-poster-url.ts`, profilo landscape del mapping),
+  `background` = backdrop TMDB grezzo per l'hero dettaglio. Nuvio in modalità
+  orizzontale carica `banner` (non `poster`): non far mai puntare `banner` al
+  backdrop grezzo o i poster Pictorium spariscono in quella modalità.
+  Gli altri client ignorano `banner` (fuori spec Stremio).
+
 - Cache catalogo (`cacheSet`/`cacheGet` in `lib/cache.ts`): key include tipo,
   `catalogId`, `POSTER_URL_VERSION`, hash `config` e hash `mdblist_key`.
   TTL: refresh schedulato alle 3:00 UTC (tag `catalog`); catalogo **vuoto** → 60 s.

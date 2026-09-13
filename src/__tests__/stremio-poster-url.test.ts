@@ -105,4 +105,57 @@ describe("buildStremioPosterUrl", () => {
   it("ignores invalid mapping timestamps", () => {
     expect(mappingVersionParam(mapping("not-a-date"))).toBeNull()
   })
+
+  it("forceShape renders a landscape URL regardless of mapping/defaults", () => {
+    // Banner Nuvio: stesso rendering in canvas landscape anche per titoli
+    // portrait, con profilo landscape del mapping quando presente.
+    const base = {
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: {},
+      mapping: { ...mapping("2026-07-16T10:15:30.000Z"), posterShape: "poster" as const },
+    }
+    const plain = buildStremioPosterUrl(base)
+    expect(plain.searchParams.has("shape")).toBe(false)
+
+    const forced = buildStremioPosterUrl({ ...base, forceShape: "landscape" })
+    expect(forced.searchParams.get("shape")).toBe("landscape")
+    expect(forced.searchParams.get("mv")).toBe(plain.searchParams.get("mv"))
+    expect(forced.searchParams.get("title")).toBe("Test")
+  })
+
+  it("forceShape applies the mapping landscape tuning profile", () => {
+    const url = buildStremioPosterUrl({
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: { gradientHeight: 30 },
+      mapping: {
+        ...mapping("2026-07-16T10:15:30.000Z"),
+        posterShape: "poster",
+        gradientHeight: 50,
+        landscape: { gradientHeight: 15 },
+      },
+    })
+    // Senza force il titolo portrait usa il profilo flat...
+    expect(url.searchParams.get("gradHeight")).toBe("50")
+
+    const forced = buildStremioPosterUrl({
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: { gradientHeight: 30 },
+      mapping: {
+        ...mapping("2026-07-16T10:15:30.000Z"),
+        posterShape: "poster",
+        gradientHeight: 50,
+        landscape: { gradientHeight: 15 },
+      },
+      forceShape: "landscape",
+    })
+    // ...con force il banner usa il profilo landscape.
+    expect(forced.searchParams.get("gradHeight")).toBe("15")
+    expect(forced.searchParams.get("shape")).toBe("landscape")
+  })
 })

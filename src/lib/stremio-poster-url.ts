@@ -2,7 +2,7 @@ import { buildPosterPublicUrl } from "@/lib/poster-public-url"
 import { buildStremioPosterSearchParams } from "@/lib/stremio-poster-params"
 import { isRankKey } from "@/lib/i18n"
 import type { ServerDefaults } from "@/lib/server-defaults"
-import { effectiveMappingForShape, type Mapping } from "@/lib/types"
+import { effectiveMappingForShape, type Mapping, type PosterShape } from "@/lib/types"
 
 export type StremioPosterType = "movie" | "series"
 
@@ -19,6 +19,14 @@ export interface BuildStremioPosterUrlInput {
   readonly config?: string | null
   readonly user?: string | null
   readonly region?: string | null
+  /**
+   * Forza il formato canvas dell'URL (default: mapping > defaults).
+   * Usato dal catalogo per il `banner` Nuvio: sempre landscape renderizzato,
+   * indipendente dal posterShape del titolo — la modalità orizzontale di
+   * Nuvio carica `banner` (non `poster`), così mostra comunque il rendering
+   * Pictorium invece del backdrop TMDB grezzo.
+   */
+  readonly forceShape?: PosterShape
 }
 
 export function mappingVersionParam(mapping: Mapping | null | undefined): string | null {
@@ -35,7 +43,10 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
   const mapping = input.mapping ?? null
   // Profili per-formato: in landscape l'URL esplicita il tuning del profilo
   // orizzontale (stessa effettività del server — query > landscape > flat).
-  const eff = effectiveMappingForShape(mapping, mapping?.posterShape === "landscape" ? "landscape" : "poster")
+  // forceShape scavalca la selezione da mapping (vedi sopra) ma il profilo
+  // resta quello del mapping salvato (fallback flat chiave-per-chiave).
+  const effShape: PosterShape = input.forceShape ?? (mapping?.posterShape === "landscape" ? "landscape" : "poster")
+  const eff = effectiveMappingForShape(mapping, effShape)
   // Custom badge testuale salvato per-titolo: emesso come `extra` (il server
   // risolve le label prefissate __badge.* con la lingua della richiesta).
   // Le rank-key (__badge.today/anime/movie/series e label equivalenti) sono
@@ -93,10 +104,11 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
     ribbonSide: input.defaults.ribbonSide,
     // Formato canvas: per-titolo vince sul default globale (come gli altri
     // parametri espliciti). Emesso solo quando landscape (vedi params).
-    posterShape: mapping?.posterShape ?? input.defaults.posterShape,
+    // forceShape (banner Nuvio) scavalca entrambi.
+    posterShape: input.forceShape ?? mapping?.posterShape ?? input.defaults.posterShape,
     // Allineamento: solo globale (il mapping non ha il campo) e solo
     // landscape — i portrait non portano mai `align` (sempre centrati).
-    logoAlign: (mapping?.posterShape ?? input.defaults.posterShape) === "landscape"
+    logoAlign: (input.forceShape ?? mapping?.posterShape ?? input.defaults.posterShape) === "landscape"
       ? input.defaults.logoAlign
       : undefined,
   })

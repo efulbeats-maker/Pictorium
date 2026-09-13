@@ -44,11 +44,13 @@ export function saveDefaults(ed: PosterEditorCtx): Promise<boolean> {
     autoRotateClean: ed.defaultAutoRotateClean,
     defaultLogoFitEnabled: ed.defaultLogoFitEnabled,
     defaultNetworkLogo: ed.defaultNetworkLogo,
+    preRelease: ed.defaultPreRelease,
     defaultRibbonSide: ed.defaultRibbonSide,
     defaultEpisodeMetadataSource: ed.defaultEpisodeMetadataSource,
     region: ed.defaultRegion,
     networkLogo: ed.defaultNetworkLogo,
     ribbonSide: ed.defaultRibbonSide,
+    posterShape: ed.defaultPosterShape,
     episodeMetadataSource: ed.defaultEpisodeMetadataSource,
   }
   safeSetItem("badgeDefaults", JSON.stringify(d))

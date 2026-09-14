@@ -32,10 +32,31 @@ const DYNAMIC_POSTER_TTL_SEC = (() => {
 })()
 const DYNAMIC_POSTER_TTL_MS = DYNAMIC_POSTER_TTL_SEC * 1000
 
-const POSTER_DYNAMIC_CACHE_CONTROL = `public, max-age=${DYNAMIC_POSTER_TTL_SEC}, s-maxage=${DYNAMIC_POSTER_TTL_SEC}, stale-while-revalidate=86400`
+// Jitter deterministico anti-thundering-herd (Milestone A): il TTL dinamico
+// varia ±10% in base all'hash FNV-1a della cache key. Deterministico: stessa
+// key → stesso TTL su tutte le istanze (mai Math.random, che frammenterebbe
+// la scadenza tra processi). Su un warmup bulk spalma le scadenze su ~72min
+// invece di farle collassare tutte nello stesso secondo.
+const DYNAMIC_TTL_JITTER_PCT = 10
+
+/** TTL di storage (ms) per una entry dinamica: base ±10% deterministico. */
+export function dynamicPosterTtlMs(cacheKey: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < cacheKey.length; i++) {
+    h ^= cacheKey.charCodeAt(i)
+    h = Math.imul(h, 0x01000193)
+  }
+  const pct = ((h >>> 0) % (2 * DYNAMIC_TTL_JITTER_PCT + 1)) - DYNAMIC_TTL_JITTER_PCT
+  return Math.round((DYNAMIC_POSTER_TTL_MS * (100 + pct)) / 100)
+}
+
+/** TTL dinamico in secondi (per gli header HTTP): deriva dallo stesso valore
+ *  dello storage — l'header non mente mai rispetto alla cache (M3). */
+export function dynamicPosterTtlSec(cacheKey: string): number {
+  return Math.round(dynamicPosterTtlMs(cacheKey) / 1000)
+}
+
 const POSTER_CDN_CACHE_CONTROL = POSTER_CACHE_CONTROL
-const POSTER_DYNAMIC_CDN_CACHE_CONTROL = POSTER_DYNAMIC_CACHE_CONTROL
-const DYNAMIC_SURROGATE = `max-age=${DYNAMIC_POSTER_TTL_SEC}, stale-while-revalidate=86400`
 
 
 export type PosterHeaders = Readonly<Record<string, string>>
@@ -133,7 +154,7 @@ const CORS_HEADERS = {
   "Vary": "Accept",
 }
 
-export function posterHeaders(etag: string, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg"): PosterHeaders {
+export function posterHeaders(etag: string, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg", dynamicTtlSec?: number): PosterHeaders {
   const contentType = FORMAT_MIME_TYPES[format] || "image/jpeg"
   if (isPreview) {
     return {
@@ -145,9 +166,15 @@ export function posterHeaders(etag: string, immutable: boolean, isPreview: boole
       "ETag": etag,
     }
   }
-  const cacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? POSTER_DYNAMIC_CACHE_CONTROL : POSTER_CACHE_CONTROL
-  const cdnCacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? POSTER_DYNAMIC_CDN_CACHE_CONTROL : POSTER_CDN_CACHE_CONTROL
-  const surrogate = immutable ? "max-age=31536000" : dynamic ? DYNAMIC_SURROGATE : "max-age=86400, stale-while-revalidate=604800"
+  // TTL reale della entry (con jitter) o base quando omesso: header e storage
+  // restano sincronizzati per costruzione (M3) — entrambi derivano da
+  // dynamicPosterTtlSec(cacheKey) nel chiamante.
+  const dynSec = dynamicTtlSec ?? DYNAMIC_POSTER_TTL_SEC
+  const dynamicCacheControl = `public, max-age=${dynSec}, s-maxage=${dynSec}, stale-while-revalidate=86400`
+  const dynamicSurrogate = `max-age=${dynSec}, stale-while-revalidate=86400`
+  const cacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? dynamicCacheControl : POSTER_CACHE_CONTROL
+  const cdnCacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? dynamicCacheControl : POSTER_CDN_CACHE_CONTROL
+  const surrogate = immutable ? "max-age=31536000" : dynamic ? dynamicSurrogate : "max-age=86400, stale-while-revalidate=604800"
   return {
     ...CORS_HEADERS,
     "Content-Type": contentType,
@@ -158,10 +185,13 @@ export function posterHeaders(etag: string, immutable: boolean, isPreview: boole
   }
 }
 
-export function posterNotModifiedHeaders(etag: string, immutable: boolean, dynamic: boolean = false): PosterHeaders {
-  const cacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? POSTER_DYNAMIC_CACHE_CONTROL : POSTER_CACHE_CONTROL
-  const cdnCacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? POSTER_DYNAMIC_CDN_CACHE_CONTROL : POSTER_CDN_CACHE_CONTROL
-  const surrogate = immutable ? "max-age=31536000" : dynamic ? DYNAMIC_SURROGATE : "max-age=86400, stale-while-revalidate=604800"
+export function posterNotModifiedHeaders(etag: string, immutable: boolean, dynamic: boolean = false, dynamicTtlSec?: number): PosterHeaders {
+  const dynSec = dynamicTtlSec ?? DYNAMIC_POSTER_TTL_SEC
+  const dynamicCacheControl = `public, max-age=${dynSec}, s-maxage=${dynSec}, stale-while-revalidate=86400`
+  const dynamicSurrogate = `max-age=${dynSec}, stale-while-revalidate=86400`
+  const cacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? dynamicCacheControl : POSTER_CACHE_CONTROL
+  const cdnCacheControl = immutable ? POSTER_IMMUTABLE_CACHE_CONTROL : dynamic ? dynamicCacheControl : POSTER_CDN_CACHE_CONTROL
+  const surrogate = immutable ? "max-age=31536000" : dynamic ? dynamicSurrogate : "max-age=86400, stale-while-revalidate=604800"
   return {
     ...CORS_HEADERS,
     "Cache-Control": cacheControl,
@@ -171,8 +201,8 @@ export function posterNotModifiedHeaders(etag: string, immutable: boolean, dynam
   }
 }
 
-export function posterResponse(payload: PosterCachePayload, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg"): Response {
-  return new Response(new Uint8Array(payload.buffer), { headers: posterHeaders(payload.etag, immutable, isPreview, dynamic, format) })
+export function posterResponse(payload: PosterCachePayload, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg", dynamicTtlSec?: number): Response {
+  return new Response(new Uint8Array(payload.buffer), { headers: posterHeaders(payload.etag, immutable, isPreview, dynamic, format, dynamicTtlSec) })
 }
 
 export function readCachedPoster(cacheKey: string): { readonly payload: PosterCachePayload | null; readonly stale: boolean } {
@@ -190,14 +220,18 @@ export function readCachedPoster(cacheKey: string): { readonly payload: PosterCa
 // finiva nel refresh schedulato giornaliero alle 3 UTC (cache.ts) e l'header
 // HTTP dynamic (6h) mentiva: in memoria il payload restava fino al refresh
 // delle 3, con rank/IMDb Top 250 potenzialmente stantii per un giorno intero.
-// DYNAMIC_POSTER_TTL_MS è definito in testa al modulo (env-parametrizzato) e
-// genera anche gli header dynamic, così header e storage restano sincronizzati.
+// DYNAMIC_POSTER_TTL_MS è definito in testa al modulo (env-parametrizzato);
+// dynamicPosterTtlMs aggiunge il jitter deterministico ±10% per key e gli
+// header dynamic derivano dallo stesso dynamicPosterTtlSec, così header e
+// storage restano sincronizzati.
 
 export function writeCachedPoster(cacheKey: string, payload: PosterCachePayload, mappingTag?: string): void {
   const tags = mappingTag ? ["poster", mappingTag] : ["poster"]
   // TTL esplicito solo per i non-mappati: per i mappati resta il refresh
   // schedulato giornaliero (immutable per un anno alla CDN, invalido per tag).
-  const ttl = mappingTag ? undefined : DYNAMIC_POSTER_TTL_MS
+  // Jitter deterministico anti-herd: stessa key → stesso TTL ovunque (M3
+  // garantito perché gli header derivano dallo stesso dynamicPosterTtlSec).
+  const ttl = mappingTag ? undefined : dynamicPosterTtlMs(cacheKey)
   cacheSet(cacheKey, payload.buffer, tags, ttl)
   cacheSet(`${cacheKey}:headers`, { etag: payload.etag }, tags, ttl)
 }
@@ -471,11 +505,17 @@ export function __resetPosterRenderLimiter(): void {
 // Poster metrics & telemetry
 // ---------------------------------------------------------------------------
 
-interface PosterStats {
+export interface PosterStats {
   requests: number
   hits: number
   renders: number
   errors: number
+  staleHits: number
+  coalescedHits: number
+  rescues: {
+    tvdb: number
+    backdropCrop: number
+  }
   formats: {
     jpeg: number
     webp: number
@@ -488,6 +528,12 @@ const posterMetrics: PosterStats = {
   hits: 0,
   renders: 0,
   errors: 0,
+  staleHits: 0,
+  coalescedHits: 0,
+  rescues: {
+    tvdb: 0,
+    backdropCrop: 0,
+  },
   formats: {
     jpeg: 0,
     webp: 0,
@@ -510,6 +556,37 @@ export function recordPosterError(): void {
   posterMetrics.errors++
 }
 
+export function recordPosterStaleHit(): void {
+  posterMetrics.staleHits++
+}
+
+export function recordPosterCoalescedHit(): void {
+  posterMetrics.coalescedHits++
+}
+
+export function recordTvdbRescue(): void {
+  posterMetrics.rescues.tvdb++
+}
+
+export function recordBackdropCropRescue(): void {
+  posterMetrics.rescues.backdropCrop++
+}
+
+/** Solo per i test: azzera i contatori telemetria poster. */
+export function __resetPosterStatsForTest(): void {
+  posterMetrics.requests = 0
+  posterMetrics.hits = 0
+  posterMetrics.renders = 0
+  posterMetrics.errors = 0
+  posterMetrics.staleHits = 0
+  posterMetrics.coalescedHits = 0
+  posterMetrics.rescues.tvdb = 0
+  posterMetrics.rescues.backdropCrop = 0
+  posterMetrics.formats.jpeg = 0
+  posterMetrics.formats.webp = 0
+  posterMetrics.formats.avif = 0
+}
+
 export function getPosterStats() {
   const hitRate = posterMetrics.requests > 0
     ? Math.round((posterMetrics.hits / posterMetrics.requests) * 1000) / 10
@@ -519,6 +596,9 @@ export function getPosterStats() {
     hits: posterMetrics.hits,
     renders: posterMetrics.renders,
     errors: posterMetrics.errors,
+    staleHits: posterMetrics.staleHits,
+    coalescedHits: posterMetrics.coalescedHits,
+    rescues: { ...posterMetrics.rescues },
     hitRate: `${hitRate}%`,
     hitRateNum: hitRate,
     formats: { ...posterMetrics.formats },

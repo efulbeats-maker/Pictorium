@@ -71,6 +71,20 @@ export async function pillarboxLandscapeBase(portraitBuf: Buffer): Promise<Buffe
     .toBuffer()
 }
 
+/**
+ * Base 2:3 di fallback quando il titolo non ha alcun poster TMDB utilizzabile
+ * ma ha un backdrop: cover-crop del backdrop sul canvas portrait con focus
+ * sul soggetto (`sharp.strategy.attention` — salienza visiva/volti, non mero
+ * dettaglio come `entropy`). Nessun titolo orfano resta mai con un 404.
+ * Trigger SOLO in sostituzione del 404, mai su poster esistenti.
+ */
+export async function cropBackdropToPortrait(backdropBuf: Buffer): Promise<Buffer> {
+  return sharp(backdropBuf)
+    .resize(STD_W, STD_H, { fit: "cover", position: sharp.strategy.attention })
+    .jpeg({ quality: 90 })
+    .toBuffer()
+}
+
 // ---- Math utilities ----
 
 /**

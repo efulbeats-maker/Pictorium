@@ -2,7 +2,7 @@ import crypto from "node:crypto"
 import { NextRequest } from "next/server"
 import { getDetails, getExternalIds } from "@/lib/tmdb"
 import { fetchAggregatedRating, SUPPORTED_RATING_SOURCES } from "@/lib/ratings"
-import { computeVote, parseRatingPreset } from "@/lib/rating-weights"
+import { computeVote } from "@/lib/rating-weights"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { cacheGet, cacheSet } from "@/lib/cache"
 import { envWithFallback } from "@/lib/env-compat"
@@ -29,20 +29,16 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const ratingSources = rsrc
     ? rsrc.split(",").map((s) => s.trim().toLowerCase()).filter((s) => validSources.includes(s))
     : undefined
-  // Preset pesi voto (stesso choke point della poster route): il client lo
-  // invia sempre esplicito dai default; assente → "balanced" (= oggi).
-  const ratingPreset = parseRatingPreset(req.nextUrl.searchParams.get("rw")) ?? "balanced"
   const mediaType = type === "tv" || type === "series" ? "tv" : "movie"
   const tmdbId = Number(id)
   if (!Number.isInteger(tmdbId) || tmdbId <= 0) {
     return Response.json({ genres: [], voteAverage: 0, voteCount: 0, status: null, type: null, release_date: null, first_air_date: null, last_air_date: null, next_episode_to_air: null, number_of_seasons: null, number_of_episodes: null, title: null, name: null, imdb_id: null })
   }
-  // mdblist_key, rsrc e rw cambiano il voto medio → parte del cache key.
+  // mdblist_key e rsrc cambiano il voto medio → parte del cache key.
   const mdblistHash = mdblistKey ? crypto.createHash("sha1").update(mdblistKey).digest("hex").slice(0, 8) : ""
   const rsrcKey = ratingSources ? ratingSources.slice().sort().join(",") : ""
-  const rwKey = ratingPreset !== "balanced" ? `:rw${ratingPreset}` : ""
-  const cacheKey = rsrcKey || rwKey
-    ? `details:v11:${type}:${tmdbId}:${language}:${mdblistHash || "nomk"}:${rsrcKey}${rwKey}`
+  const cacheKey = rsrcKey
+    ? `details:v11:${type}:${tmdbId}:${language}:${mdblistHash || "nomk"}:${rsrcKey}`
     : `details:v11:${type}:${tmdbId}:${language}:${mdblistHash || "nomk"}`
   interface Genre { id: number; name: string }
   interface Episode { id: number; name: string; air_date: string | null; episode_number: number; season_number: number }
@@ -69,7 +65,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           ])
           if (ratingTimer) clearTimeout(ratingTimer)
           aggregatedData = aggregated
-          const avgVote = computeVote(aggregated, ratingPreset, ratingSources)
+          const avgVote = computeVote(aggregated, ratingSources)
           return avgVote ?? data.vote_average ?? 0
         })())
       : data.vote_average ?? 0

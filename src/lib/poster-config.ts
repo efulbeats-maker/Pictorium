@@ -11,7 +11,6 @@ import type { ServerDefaults } from "./server-defaults"
 import { resolveLabelFor } from "./i18n"
 import { SUPPORTED_RATING_SOURCES, DEFAULT_RATING_SOURCES } from "./ratings"
 import { parseMinQuality, type StreamQuality } from "./quality-tiers"
-import { parseRatingPreset, type RatingPreset } from "./rating-weights"
 import { parseSashOrder, normalizeSashOrder, DEFAULT_SASH_ORDER, type SashBucket } from "./badge-priority"
 import {
   isBadgeStyle,
@@ -84,8 +83,6 @@ export interface PosterRenderConfig {
   badgeQuality: boolean
   /** Soglia minima tier qualità streaming — catena: query `qmin` > server defaults > "SD". Globale (nessun per-titolo). */
   minQuality: StreamQuality
-  /** Preset pesi voto — catena: query `rw` > server defaults > "balanced". Globale (nessun per-titolo). */
-  ratingPreset: RatingPreset
   /** Ordine/priorità sash — catena: query `sash` > server defaults > default. Globale (nessun per-titolo). */
   sashOrder: SashBucket[]
   /** Riga rating custom provider (display). Default ON quando il provider è configurato. */
@@ -247,10 +244,6 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   // > "SD" (tutto mostrato). Valori non validi → default. Nessun override
   // per-titolo/config in Fase 1 (il mapping non ha il campo).
   const minQuality: StreamQuality = parseMinQuality(q.get("qmin")) ?? parseMinQuality(sd.minQuality ?? null) ?? "SD"
-
-  // Preset pesi voto — globale: query `rw` > server defaults > "balanced"
-  // (= comportamento attuale). Nessun override per-titolo/config in Fase 3.
-  const ratingPreset: RatingPreset = parseRatingPreset(q.get("rw")) ?? parseRatingPreset(sd.ratingPreset ?? null) ?? "balanced"
 
   // Ordine sash — globale: query `sash` (sottoinsieme ordinato, non listati =
   // spenti) > server defaults > default. Token non validi ignorati, mai garbage.
@@ -437,7 +430,6 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     badgeRating,
     badgeQuality,
     minQuality,
-    ratingPreset,
     sashOrder,
     customRatings,
     ratingSources,

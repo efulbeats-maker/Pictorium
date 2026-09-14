@@ -8,7 +8,6 @@ import { getWarmupCatalogs } from "@/lib/catalog-definitions"
 import { createLogger } from "@/lib/logger"
 import { z } from "zod"
 import { BADGE_STYLES, RANKING_BADGE_STYLES } from "@/lib/badge-styles"
-import { RATING_PRESETS } from "@/lib/rating-weights"
 import { readJsonBody, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from "@/lib/read-body"
 import { envWithFallback } from "@/lib/env-compat"
 
@@ -63,7 +62,6 @@ const defaultsSchema = z.object({
   }, { message: "customRatingEndpoint must be an http(s) URL containing {imdbId} without credentials" }),
   customRatingApiKeyHeader: z.string().max(64).optional(),
   ratingSources: z.array(z.string()).optional(),
-  ratingPreset: z.enum(RATING_PRESETS).optional(),
   sashOrder: z.array(z.string().max(20)).optional(),
   autoRotateClean: z.boolean().optional(),
   defaultAutoRotateBackdrop: z.boolean().optional(),

@@ -84,7 +84,6 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
     minQuality: input.defaults.minQuality ?? undefined,
     customRatings: mapping?.customRatings ?? input.defaults.customRatings,
     ratingSources: input.defaults.ratingSources,
-    ratingPreset: input.defaults.ratingPreset ?? undefined,
     sashOrder: input.defaults.sashOrder ?? undefined,
     badgeStyle: mapping?.badgeStyle ?? input.defaults.badgeStyle,
     rankingBadgeStyle: mapping?.rankingBadgeStyle ?? input.defaults.rankingBadgeStyle,

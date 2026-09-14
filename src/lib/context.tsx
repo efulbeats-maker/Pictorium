@@ -375,7 +375,6 @@ export function usePictorium(): PictoriumCtx {
     defaultBadgeRating,
     defaultBadgeQuality,
     defaultCustomRatings,
-    defaultRatingPreset,
     defaultSashOrder,
     defaultRibbonSide,
     defaultPosterShape,
@@ -670,14 +669,14 @@ export function usePictorium(): PictoriumCtx {
   useEffect(() => {
     setUrlPattern(buildUrlPattern({
       globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle,
-      badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, ratingPreset: defaultRatingPreset,
+      badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources,
       customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
       topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
       genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
       networkLogoOffsetX, networkLogoOffsetY,
       tmdbKey, lang, mdblistApiKey,
     }))
-    }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, defaultRatingPreset, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
+    }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
 
   // --- Preview URL ---
   const buildPreviewUrlCb = useCallback(() => {
@@ -693,14 +692,14 @@ export function usePictorium(): PictoriumCtx {
         topEdgeColor, accentColor, lang, tmdbKey,
         region: editorCtx.defaultRegion,
       },
-      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, ratingPreset: defaultRatingPreset, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
+      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
     )
     setPreviewUrl(url)
   }, [navigation.selected, navigation.previewPoster, navigation.selectedLogo, selectedBackdrop,
     logoScale, logoOffsetX, logoOffsetY, backdropScale, backdropOffsetX, backdropOffsetY,
     metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, accentColor, lang, tmdbKey,
     editorCtx.defaultRegion,
-    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, defaultRatingPreset, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
+    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
 
   // A1: trailing debounce della preview URL (200ms). Ogni tick di slider
   // cambia l'identità di buildPreviewUrlCb → senza debounce ogni pixel di
@@ -743,9 +742,8 @@ export function usePictorium(): PictoriumCtx {
     const itemType = item.media_type
     const mdblistParam = mdblistApiKey ? "&mdblist_key=" + encodeURIComponent(mdblistApiKey) : ""
     const rsrcParam = ratingSources && ratingSources.length > 0 ? "&rsrc=" + encodeURIComponent(ratingSources.join(",")) : ""
-    const rwParam = defaultRatingPreset && defaultRatingPreset !== "balanced" ? "&rw=" + defaultRatingPreset : ""
     const regionLang = getRegionDef(editorCtx.defaultRegion).lang
-    const detailsUrl = `/api/tmdb/${itemId}/details?type=${itemType}&language=${regionLang}&api_key=${tmdbKey}${mdblistParam}${rsrcParam}${rwParam}`
+    const detailsUrl = `/api/tmdb/${itemId}/details?type=${itemType}&language=${regionLang}&api_key=${tmdbKey}${mdblistParam}${rsrcParam}`
     // Le immagini partono SUBITO in parallelo ai details (non dopo): la lingua
     // originale serve solo ad allargare la query quando è fuori da lang/en.
     // Niente retry qui: i dati si ricaricano al tick dopo, e un retry
@@ -794,10 +792,10 @@ export function usePictorium(): PictoriumCtx {
     return { details, data, itemId, itemType }
   }
 
-  // --- Aggiornamento reattivo voto medio quando cambia ratingSources/preset ---
+  // --- Aggiornamento reattivo voto medio quando cambia ratingSources ---
   useEffect(() => {
     if (metaInfo.aggregatedRatings) {
-      const calculated = computeVote(metaInfo.aggregatedRatings, defaultRatingPreset ?? "balanced", ratingSources)
+      const calculated = computeVote(metaInfo.aggregatedRatings, ratingSources)
       if (typeof calculated === "number" && calculated > 0) {
         setMetaInfo((prev) => ({ ...prev, voteAverage: calculated }))
         return
@@ -808,9 +806,8 @@ export function usePictorium(): PictoriumCtx {
     const itemType = navigation.selected.media_type
     const mdblistParam = mdblistApiKey ? "&mdblist_key=" + encodeURIComponent(mdblistApiKey) : ""
     const rsrcParam = ratingSources && ratingSources.length > 0 ? "&rsrc=" + encodeURIComponent(ratingSources.join(",")) : ""
-    const rwParam = defaultRatingPreset && defaultRatingPreset !== "balanced" ? "&rw=" + defaultRatingPreset : ""
     const regionLang = getRegionDef(editorCtx.defaultRegion).lang
-    const detailsUrl = `/api/tmdb/${itemId}/details?type=${itemType}&language=${regionLang}&api_key=${tmdbKey}${mdblistParam}${rsrcParam}${rwParam}`
+    const detailsUrl = `/api/tmdb/${itemId}/details?type=${itemType}&language=${regionLang}&api_key=${tmdbKey}${mdblistParam}${rsrcParam}`
     let active = true
     http<{ voteAverage: number; aggregatedRatings?: AggregatedRatings | null }>(detailsUrl, { timeout: 15000 }).then((d) => {
       if (!active) return
@@ -825,7 +822,7 @@ export function usePictorium(): PictoriumCtx {
     return () => {
       active = false
     }
-  }, [ratingSources, defaultRatingPreset]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ratingSources]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Poster image refresh ---
   useEffect(() => {

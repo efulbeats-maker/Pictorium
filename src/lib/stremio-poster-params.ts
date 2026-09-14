@@ -1,7 +1,6 @@
 import { POSTER_URL_VERSION } from "@/lib/render-version"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
 import { parseMinQuality, type StreamQuality } from "@/lib/quality-tiers"
-import { parseRatingPreset, type RatingPreset } from "@/lib/rating-weights"
 import { parseSashOrder, isDefaultSashOrder, type SashBucket } from "@/lib/badge-priority"
 import type { PosterShape } from "@/lib/types"
 
@@ -26,8 +25,6 @@ export interface StremioPosterParamsInput {
   /** Riga rating custom provider (display). `false` emette `cr=0`. */
   readonly customRatings?: boolean
   readonly ratingSources?: string[]
-  /** Preset pesi voto (emesso come `rw` solo quando non-balanced). */
-  readonly ratingPreset?: RatingPreset | null
   /** Ordine sash (emesso come `sash` solo quando non-default). */
   readonly sashOrder?: readonly SashBucket[] | null
   readonly badgeStyle?: BadgeStyle
@@ -133,8 +130,6 @@ export function buildStremioPosterSearchParams(input: StremioPosterParamsInput):
   if (mq && mq !== "SD") params.set("qmin", mq)
   if (input.customRatings === false) params.set("cr", "0")
   if (input.ratingSources && input.ratingSources.length > 0) params.set("rsrc", input.ratingSources.join(","))
-  const rw = parseRatingPreset(input.ratingPreset ?? null)
-  if (rw && rw !== "balanced") params.set("rw", rw)
   if (input.sashOrder && !isDefaultSashOrder(input.sashOrder)) {
     const parsed = parseSashOrder(input.sashOrder.join(","))
     if (parsed) params.set("sash", parsed.join(","))

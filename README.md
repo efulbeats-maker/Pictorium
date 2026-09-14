@@ -324,7 +324,6 @@ npm install --ignore-scripts && npm run build && npm start
 | `PICTORIUM_TINT_STRENGTH` | `0` – `100` | Intensità tinta di scena dello sfondo (default `20`). |
 | `PICTORIUM_BADGE_QUALITY` | `1` / `0` | Mostra/nasconde il badge qualità streaming (4K/FHD). |
 | `PICTORIUM_QUALITY_MIN` | `SD` / `HD` / `FHD` / `4K` | Soglia minima tier qualità: sotto soglia niente badge (default `SD`, tutto mostrato; query `?qmin=`). |
-| `PICTORIUM_RATING_PRESET` | `balanced` / `cinephile` / `series` / `raw` | Preset pesi voto medio: `cinephile` = Letterboxd 0.8 + RT 0.2 (film), `series` = Trakt 0.8 + RT 0.2; fallback automatico su media pari se le fonti mancano (default `balanced`, query `?rw=`). |
 | `PICTORIUM_SASH_ORDER` | `upcoming,rank,new,award,extra` | Ordine/priorità categorie badge superiore (sottoinsieme ammesso: non listate = spente; query `?sash=`). |
 | `PICTORIUM_NETWORK_LOGO` | `1` / `0` | Mostra/nasconde il logo del network (Netflix, Prime, ecc.). |
 | `PICTORIUM_PRE_RELEASE` | `1` / `0` | Velo scuro + nastro "Coming Soon" sui film non ancora disponibili in digitale (default OFF). |

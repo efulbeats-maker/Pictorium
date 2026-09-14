@@ -52,7 +52,6 @@ const USER_SAVED = {
   customRatingEndpoint: "",
   customRatingApiKeyHeader: "",
   ratingSources: ["imdb", "tmdb"],
-  ratingPreset: "balanced",
   sashOrder: ["upcoming", "rank", "new", "award", "extra"],
   autoRotateClean: false,
   defaultAutoRotateBackdrop: false,

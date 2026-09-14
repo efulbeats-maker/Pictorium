@@ -5,7 +5,6 @@ import { DATA_DIR } from "@/lib/data-dir"
 import { createLogger } from "@/lib/logger"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
 import type { StreamQuality } from "@/lib/quality-tiers"
-import type { RatingPreset } from "@/lib/rating-weights"
 import type { SashBucket } from "@/lib/badge-priority"
 import { isBadgeStyle, isRankingBadgeStyle } from "@/lib/badge-styles"
 import { normalizeRegion } from "@/lib/regions"
@@ -38,8 +37,6 @@ export interface ServerDefaults {
   /** Header della chiave provider (UI). Default "X-API-Key". */
   customRatingApiKeyHeader?: string
   ratingSources?: string[]
-  /** Preset pesi voto (balanced = media pari attuale). Default "balanced". */
-  ratingPreset?: RatingPreset
   /** Ordine/priorità sash (sottoinsieme ammesso: non listati = spenti). Default = ordine standard. */
   sashOrder?: SashBucket[]
   autoRotateClean?: boolean
@@ -132,8 +129,6 @@ function defaultsFromEnv(): ServerDefaults {
   if (cr !== undefined) d.customRatings = cr
   const rsrcEnv = getEnv("RATING_SOURCES")?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
   if (rsrcEnv && rsrcEnv.length > 0) d.ratingSources = rsrcEnv
-  const rwEnv = getEnv("RATING_PRESET")?.trim().toLowerCase()
-  if (rwEnv === "balanced" || rwEnv === "cinephile" || rwEnv === "series" || rwEnv === "raw") d.ratingPreset = rwEnv
   // Ordine sash da env (stesso formato della query): token validi, dedup.
   // Vuoto/invalido → ignorato (default). Array salvato via UI non toccato qui.
   const sashEnv = getEnv("SASH_ORDER")?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)

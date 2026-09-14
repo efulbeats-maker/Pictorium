@@ -588,24 +588,6 @@ describe("resolvePosterRenderConfig", () => {
     expect(rConfig.ratingSources).toEqual(["letterboxd", "trakt"])
   })
 
-  it("ratingPreset defaults to balanced; query rw wins over server defaults", () => {
-    expect(resolvePosterRenderConfig(baseInput()).ratingPreset).toBe("balanced")
-
-    const rQuery = resolvePosterRenderConfig(baseInput({
-      searchParams: new URLSearchParams({ rw: "cinephile" }),
-      sd: { ratingPreset: "series" },
-    }))
-    expect(rQuery.ratingPreset).toBe("cinephile")
-
-    const rSd = resolvePosterRenderConfig(baseInput({ sd: { ratingPreset: "series" } }))
-    expect(rSd.ratingPreset).toBe("series")
-
-    const rInvalid = resolvePosterRenderConfig(baseInput({
-      searchParams: new URLSearchParams({ rw: "tarocco" }),
-    }))
-    expect(rInvalid.ratingPreset).toBe("balanced")
-  })
-
   it("sashOrder defaults to standard order; query sash wins over server defaults", () => {
     expect(resolvePosterRenderConfig(baseInput()).sashOrder).toEqual(
       ["upcoming", "rank", "new", "award", "extra"],

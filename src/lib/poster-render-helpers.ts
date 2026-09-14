@@ -2,6 +2,7 @@ import crypto from "node:crypto"
 import sharp from "sharp"
 import { findAccentColor, findSceneTint } from "@/lib/accent-color"
 import { GENRE_FALLBACK } from "@/lib/badges"
+import { ARTWORKS_BASE } from "@/lib/tvdb"
 // Batch B: STD_W/STD_H ora provengono da image-utils.ts (single source of truth)
 import { STD_W, STD_H, computeRegionStats } from "@/lib/image-utils"
 
@@ -58,8 +59,9 @@ export function isValidHex(color: string): boolean {
 
 export function imgSrc(path: string): string {
   if (path.startsWith("http")) {
-    // SSRF protection: only allow TMDB image CDN
-    if (!path.startsWith("https://image.tmdb.org/t/p/")) {
+    // SSRF protection: only allow the TMDB image CDN and the TVDB artworks
+    // CDN (fixed hosts — B1 rescue posters; same review bar as TMDB).
+    if (!path.startsWith("https://image.tmdb.org/t/p/") && !path.startsWith(`${ARTWORKS_BASE}/`)) {
       throw new Error(`Blocked external image URL: ${path.slice(0, 60)}...`)
     }
     return path

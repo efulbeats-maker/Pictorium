@@ -4,5 +4,5 @@
 // del package.json quando git non è disponibile.
 // APP_COMMIT: SHA corto di HEAD (quale commit gira in produzione);
 // "unknown" senza git.
-export const APP_VERSION = "1.20.8"
-export const APP_COMMIT = "33369a7"
+export const APP_VERSION = "1.20.10"
+export const APP_COMMIT = "aef1e2c"

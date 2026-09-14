@@ -4,6 +4,7 @@ import { useCallback } from "react"
 import type { SearchResult, TMDBImage, Mapping, PosterShape } from "./types"
 import { titleOf } from "./utils"
 import { computeTopBadge, type BadgeInput } from "./poster-badge"
+import type { SashBucket } from "./badge-priority"
 import { defaultGradientHeightForPoster } from "./gradient-defaults"
 import { logoDefaultScale } from "./logo-selection"
 import { t } from "./i18n"
@@ -84,6 +85,8 @@ interface PosterSaveDeps {
   setLogoOffsetY: (v: number) => void
   networkLogo: boolean
   lang: string
+  /** Ordine sash dai default editor (stesso del render, o il salvataggio congela un badge diverso). */
+  defaultSashOrder?: readonly SashBucket[] | null
   episodeGroupId?: string | null
   /** Formato canvas in editing (congelato per-titolo al save). */
   posterShape: PosterShape
@@ -114,7 +117,8 @@ export function usePosterSave(deps: PosterSaveDeps) {
     networkLogoOffsetX, networkLogoOffsetY,
     rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, logoDisabled, setLogoDisabled,
     rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops,
-    setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId, posterShape,
+    setLogoScale, setLogoOffsetX, setLogoOffsetY,     networkLogo, lang, episodeGroupId, posterShape,
+    defaultSashOrder,
   } = deps
 
   const selectPoster = useCallback(async (image: TMDBImage) => {
@@ -216,7 +220,7 @@ export function usePosterSave(deps: PosterSaveDeps) {
       tvStatus: selected.media_type === "tv" ? metaInfo.status : null,
       imdbTop250: !!imdbTop250,
     }
-    const computed = computeTopBadge(badgeInput, t, lang)
+    const computed = computeTopBadge(badgeInput, t, lang, defaultSashOrder ?? null)
     const isUpcomingReleaseBadge = !!computed.upcomingRelease && computed.badge?.type === "extra" && computed.badge.label === computed.upcomingRelease
     // Come "In uscita", anche "Nuova stagione" è time-bound: non va congelato
     // nel mapping salvato (resterebbe per sempre), quindi è escluso da badgeExtra.

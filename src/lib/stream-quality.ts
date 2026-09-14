@@ -5,7 +5,11 @@ import { envWithFallback } from "./env-compat"
 
 const log = createLogger("stream-quality")
 
-export type StreamQuality = "4K" | "FHD" | "HD" | "SD"
+// Tier/soglia in quality-tiers.ts (zero dipendenze): qui solo re-export per
+// compatibilità degli import esistenti (+ import type per l'uso locale).
+import type { StreamQuality } from "./quality-tiers"
+export type { StreamQuality } from "./quality-tiers"
+export { parseMinQuality, isQualityAtLeast, applyMinQuality } from "./quality-tiers"
 
 const TORRENTIO_BASE_URL = (envWithFallback("TORRENTIO_URL") || process.env.TORRENTIO_URL || "https://torrentio.strem.fun").replace(/\/+$/, "")
 const STREAM_CACHE_TTL = 30 * 60 * 1000 // 30 minutes

@@ -22,8 +22,9 @@ import { renderFirstMatchingNetworkLogoBadge, renderFirstMatchingNetworkRawBadge
 import { computeLogoLayout, logoAlignPadX } from "./logo-layout"
 import fs from "fs"
 import path from "path"
-import { estimateTextWidth, fontFamilyFor } from "./badge-svg-shared"
+import { estimateTextWidth, fontFamilyFor, escSvg } from "./badge-svg-shared"
 import { computeTopBadge, isNetworkStudio, type BadgeInput } from "./poster-badge"
+import type { SashBucket } from "./badge-priority"
 import { PRE_RELEASE_DIM_ALPHA, PRE_RELEASE_BLUR_SIGMA } from "./pre-release"
 import type { Mapping } from "./types"
 import type { ServerDefaults } from "./server-defaults"
@@ -90,6 +91,8 @@ export interface GenerationInput {
   badgeRating: boolean
   badgeQuality?: boolean
   quality?: string | null
+  /** Ordine/priorità sash (sottoinsieme = resto spento). Default = ordine standard. */
+  sashOrder?: readonly SashBucket[] | null
   topLight: boolean
   targetCenter: number
   /** Modalità layout nastro Netflix + logo network: "left" (Nuvio, default) o "right" (Stremio). */
@@ -196,8 +199,12 @@ async function getVignette(canvasW: number = STD_W, canvasH: number = STD_H): Pr
   const key = `${canvasW}x${canvasH}`
   let p = _vignetteCache.get(key)
   if (!p) {
-    p = sharp(Buffer.from(cinematicVignetteSVG(canvasW, canvasH))).png().toBuffer()
-    _vignetteCache.set(key, p)
+    const fresh = sharp(Buffer.from(cinematicVignetteSVG(canvasW, canvasH))).png().toBuffer()
+    // Reset su reject: una Promise respinta resterebbe cachata e avvelenerebbe
+    // tutti i render futuri (stesso pattern di loadResvg in svg-badge.ts).
+    fresh.catch(() => { if (_vignetteCache.get(key) === fresh) _vignetteCache.delete(key) })
+    _vignetteCache.set(key, fresh)
+    p = fresh
   }
   return p
 }
@@ -206,7 +213,10 @@ async function getVignette(canvasW: number = STD_W, canvasH: number = STD_H): Pr
 let _landscapeScrimPromise: Promise<Buffer> | null = null
 async function getLandscapeScrim(): Promise<Buffer> {
   if (!_landscapeScrimPromise) {
-    _landscapeScrimPromise = sharp(Buffer.from(cinematicCornerGradientSVG(LAND_W, LAND_H))).png().toBuffer()
+    const fresh = sharp(Buffer.from(cinematicCornerGradientSVG(LAND_W, LAND_H))).png().toBuffer()
+    // Reset su reject: vedi getVignette sopra.
+    fresh.catch(() => { if (_landscapeScrimPromise === fresh) _landscapeScrimPromise = null })
+    _landscapeScrimPromise = fresh
   }
   return _landscapeScrimPromise
 }
@@ -216,7 +226,7 @@ async function getPreReleaseDim(canvasW: number = STD_W, canvasH: number = STD_H
   const key = `${canvasW}x${canvasH}`
   let p = _preReleaseDimCache.get(key)
   if (!p) {
-    p = sharp({
+    const fresh = sharp({
       create: {
         width: canvasW,
         height: canvasH,
@@ -224,7 +234,10 @@ async function getPreReleaseDim(canvasW: number = STD_W, canvasH: number = STD_H
         background: { r: 0, g: 0, b: 0, alpha: PRE_RELEASE_DIM_ALPHA },
       },
     }).png().toBuffer()
-    _preReleaseDimCache.set(key, p)
+    // Reset su reject: vedi getVignette sopra.
+    fresh.catch(() => { if (_preReleaseDimCache.get(key) === fresh) _preReleaseDimCache.delete(key) })
+    _preReleaseDimCache.set(key, fresh)
+    p = fresh
   }
   return p
 }
@@ -388,7 +401,7 @@ export async function renderCombinedRankNetworkPill(rank: number, label: string,
   const textY = pt + fs / 2
   const logoY = pt + fs + gap + netLogo.h / 2
   const logoX = Math.round((pillW - netLogo.w) / 2)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pillW}" height="${pillH}"><rect width="${pillW}" height="${pillH}" rx="${r}" fill="${bg}" stroke="${topLight ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.20)"}" stroke-width="1"/><text x="${pillW / 2}" y="${textY}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamilyFor(text)}" font-weight="700" font-size="${fs}" fill="${fg}">${text.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</text><image href="data:image/png;base64,${netLogo.png.toString("base64")}" x="${logoX}" y="${Math.round(logoY - netLogo.h / 2)}" width="${netLogo.w}" height="${netLogo.h}"/></svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pillW}" height="${pillH}"><rect width="${pillW}" height="${pillH}" rx="${r}" fill="${bg}" stroke="${topLight ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.20)"}" stroke-width="1"/><text x="${pillW / 2}" y="${textY}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamilyFor(text)}" font-weight="700" font-size="${fs}" fill="${fg}">${escSvg(text)}</text><image href="data:image/png;base64,${netLogo.png.toString("base64")}" x="${logoX}" y="${Math.round(logoY - netLogo.h / 2)}" width="${netLogo.w}" height="${netLogo.h}"/></svg>`
   // Render via resvg (stesso path degli altri badge — renderSVG hoisted)
   const png = await renderSVG(svg, pillW)
   return { png, w: pillW, h: pillH }
@@ -429,7 +442,7 @@ export async function renderCombinedExtraNetworkPill(label: string, networkKey: 
   const textY = pt + fs / 2
   const logoX = Math.round((pillW - netLogo.w) / 2)
   const logoY = pt + fs + gap + netLogo.h / 2
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pillW}" height="${pillH}"><rect width="${pillW}" height="${pillH}" rx="${r}" fill="${bg}" stroke="${topLight ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.20)"}" stroke-width="1"/><text x="${pillW / 2}" y="${textY}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamilyFor(label)}" font-weight="700" font-size="${fs}" fill="${fg}">${label.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</text><image href="data:image/png;base64,${netLogo.png.toString("base64")}" x="${logoX}" y="${Math.round(logoY - netLogo.h / 2)}" width="${netLogo.w}" height="${netLogo.h}"/></svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${pillW}" height="${pillH}"><rect width="${pillW}" height="${pillH}" rx="${r}" fill="${bg}" stroke="${topLight ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.20)"}" stroke-width="1"/><text x="${pillW / 2}" y="${textY}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamilyFor(label)}" font-weight="700" font-size="${fs}" fill="${fg}">${escSvg(label)}</text><image href="data:image/png;base64,${netLogo.png.toString("base64")}" x="${logoX}" y="${Math.round(logoY - netLogo.h / 2)}" width="${netLogo.w}" height="${netLogo.h}"/></svg>`
   const png = await renderSVG(svg, pillW)
   return { png, w: pillW, h: pillH }
 }
@@ -538,6 +551,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     tintStrength = 20,
     badgesEnabled, rankingEnabled, genreName, voteAverage, badgeStyle,
     rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, quality,
+    sashOrder,
     topLight, targetCenter, ribbonSide,
     logoScale, logoOffsetX, logoOffsetY,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
@@ -732,7 +746,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     keywords: [...tmdbKeywords],
     imdbTop250: !!imdbTop250,
   }
-  const computed = computeTopBadge(badgeInput, t, locale)
+  const computed = computeTopBadge(badgeInput, t, locale, sashOrder ?? null)
   const studioBadge = computed.studioBadge
   const isNetStudio = isNetworkStudio(studioBadge)
 

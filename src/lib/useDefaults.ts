@@ -7,6 +7,8 @@ import { isPosterShape } from "./types"
 import { normalizeRegion } from "./regions"
 import { shouldSkipServerSync } from "./guest-guard"
 import { t } from "./i18n"
+import { parseRatingPreset, type RatingPreset } from "./rating-weights"
+import { normalizeSashOrder, DEFAULT_SASH_ORDER, type SashBucket } from "./badge-priority"
 
 export type RibbonSide = "left" | "right"
 
@@ -46,6 +48,10 @@ export interface DefaultsState {
   /** Header chiave provider salvato via UI. */
   defaultCustomRatingApiKeyHeader?: string
   defaultRatingSources: string[]
+  /** Preset pesi voto di default (globale, nessun per-titolo in Fase 3). */
+  defaultRatingPreset: RatingPreset
+  /** Bucket sash abilitati (ordine canonico; vuota = tutto spento). */
+  defaultSashOrder: SashBucket[]
   defaultAutoRotateClean: boolean
   /** Rotazione 24h di default per formato (sdoppiata). */
   defaultAutoRotateBackdrop: boolean
@@ -133,6 +139,8 @@ const DEFAULTS: DefaultsState = {
   defaultBadgeQuality: true,
   defaultCustomRatings: true,
   defaultRatingSources: ["imdb", "tmdb"],
+  defaultRatingPreset: "balanced",
+  defaultSashOrder: [...DEFAULT_SASH_ORDER],
   defaultAutoRotateClean: false,
   defaultAutoRotateBackdrop: false,
   defaultPortraitFitEnabled: true,
@@ -243,6 +251,10 @@ interface StoredDefaults {
   customRatingApiKeyHeader?: string
   defaultRatingSources?: string[]
   ratingSources?: string[]
+  /** Storage non validato: parsato con parseRatingPreset in buildFromStored. */
+  defaultRatingPreset?: string
+  /** Bucket sash abilitati (grezzi; normalizzati in buildFromStored). */
+  defaultSashOrder?: string[]
   defaultAutoRotateClean?: boolean
   defaultAutoRotateBackdrop?: boolean
   defaultPortraitFitEnabled?: boolean
@@ -322,6 +334,8 @@ function buildFromStored(d: StoredDefaults | null): DefaultsState {
     defaultCustomRatingEndpoint: d.defaultCustomRatingEndpoint ?? d.customRatingEndpoint,
     defaultCustomRatingApiKeyHeader: d.defaultCustomRatingApiKeyHeader ?? d.customRatingApiKeyHeader,
     defaultRatingSources: d.defaultRatingSources ?? d.ratingSources ?? ["imdb", "tmdb"],
+    defaultRatingPreset: parseRatingPreset(d.defaultRatingPreset) ?? "balanced",
+    defaultSashOrder: normalizeSashOrder(d.defaultSashOrder) ?? [...DEFAULT_SASH_ORDER],
     defaultAutoRotateClean: d.defaultAutoRotateClean ?? d.autoRotateClean ?? false,
     defaultAutoRotateBackdrop: d.defaultAutoRotateBackdrop ?? false,
     // Migrazione: il vecchio flag unico alimenta entrambi i formati.
@@ -412,6 +426,8 @@ function defaultsToPayload(d: DefaultsState): Record<string, unknown> {
     customRatingEndpoint: d.defaultCustomRatingEndpoint ?? "",
     customRatingApiKeyHeader: d.defaultCustomRatingApiKeyHeader ?? "",
     ratingSources: d.defaultRatingSources,
+    ratingPreset: d.defaultRatingPreset,
+    sashOrder: d.defaultSashOrder,
     autoRotateClean: d.defaultAutoRotateClean,
     defaultAutoRotateBackdrop: d.defaultAutoRotateBackdrop,
     defaultPortraitFitEnabled: d.defaultPortraitFitEnabled,
@@ -468,6 +484,12 @@ export function useDefaults() {
         if (!currentStored?.ratingSources && !currentStored?.defaultRatingSources && Array.isArray(serverData.ratingSources)) {
           merged.defaultRatingSources = serverData.ratingSources
           merged.ratingSources = serverData.ratingSources
+        }
+        if (!currentStored?.defaultRatingPreset && typeof serverData.ratingPreset === "string" && parseRatingPreset(serverData.ratingPreset)) {
+          merged.defaultRatingPreset = serverData.ratingPreset
+        }
+        if (!currentStored?.defaultSashOrder && Array.isArray(serverData.sashOrder)) {
+          merged.defaultSashOrder = serverData.sashOrder
         }
         const updated = buildFromStored(merged)
         setState(updated)

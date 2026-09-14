@@ -3,6 +3,7 @@ import { resolveLabel, isRankKey, t as tFn } from "./i18n"
 import { getPosterPublicBaseUrl } from "./poster-public-url"
 import { buildStremioPosterSearchParams } from "./stremio-poster-params"
 import { RENDER_VERSION } from "./render-version"
+import { parseRatingPreset, type RatingPreset } from "./rating-weights"
 import { TOP_LIGHT_LUMINANCE } from "./constants"
 import type { SearchResult, TMDBImage } from "./types"
 import type { EnrichedAnimeItem } from "./validation"
@@ -22,6 +23,8 @@ interface BadgeParams {
   /** Riga rating custom provider (display). `false` emette `cr=0`. */
   customRatings?: boolean
   ratingSources?: string[]
+  /** Preset pesi voto (globale). Emesso come `rw` solo quando non-balanced. */
+  ratingPreset?: RatingPreset | null
   customBadge: string | null
   gradientHeight: number
   blurIntensity: number
@@ -106,6 +109,7 @@ export function buildUrlPattern(bp: BadgeParams & { tmdbKey: string; lang: strin
     badgeQuality: bp.badgeQuality,
     customRatings: bp.customRatings,
     ratingSources: bp.ratingSources,
+    ratingPreset: bp.ratingPreset,
     badgeStyle: bp.badgeStyle,
     rankingBadgeStyle: bp.rankingBadgeStyle,
     gradientHeight: bp.gradientHeight,
@@ -157,6 +161,8 @@ export function buildPreviewUrl(ps: PosterState, bp: BadgeParams): string {
   // customRatings=false scavalcerebbe il toggle editor (desync WYSIWYG).
   params.push(`cr=${bp.customRatings === false ? "0" : "1"}`)
   if (bp.ratingSources && bp.ratingSources.length > 0) params.push(`rsrc=${encodeURIComponent(bp.ratingSources.join(","))}`)
+  const rw = parseRatingPreset(bp.ratingPreset ?? null)
+  if (rw && rw !== "balanced") params.push(`rw=${rw}`)
   if (ps.previewPoster) {
     params.push(`poster=${encodeURIComponent(ps.previewPoster.file_path)}`)
     const genre = ps.metaInfo.genres[0]?.name

@@ -4,6 +4,8 @@ import { createContext, useContext, useState, useMemo, useCallback } from "react
 import type { TMDBImage, PosterShape } from "@/lib/types"
 import { useDefaults } from "@/lib/useDefaults"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
+import type { RatingPreset } from "@/lib/rating-weights"
+import type { SashBucket } from "@/lib/badge-priority"
 
 /**
  * PosterEditorCtx — possiede il proprio stato di editing (badge defaults,
@@ -120,6 +122,12 @@ export interface PosterEditorCtx {
   setDefaultCustomRatingApiKeyHeader: (v: string | undefined | ((prev: string | undefined) => string | undefined)) => void
   defaultRatingSources: string[]
   setDefaultRatingSources: (v: string[] | ((prev: string[]) => string[])) => void
+  /** Preset pesi voto di default (globale, nessun per-titolo in Fase 3). */
+  defaultRatingPreset: RatingPreset
+  setDefaultRatingPreset: (v: RatingPreset | ((prev: RatingPreset) => RatingPreset)) => void
+  /** Bucket sash abilitati (ordine canonico; vuota = tutto spento). */
+  defaultSashOrder: SashBucket[]
+  setDefaultSashOrder: (v: SashBucket[] | ((prev: SashBucket[]) => SashBucket[])) => void
   defaultAutoRotateClean: boolean
   setDefaultAutoRotateClean: (v: boolean | ((prev: boolean) => boolean)) => void
   defaultAutoRotateBackdrop: boolean
@@ -299,7 +307,7 @@ export function PosterEditorProvider({
     defaultGenreBadgeScale, defaultQualityBadgeScale, defaultNetworkLogoScale,
     defaultGenreBadgeOffsetX, defaultGenreBadgeOffsetY, defaultQualityBadgeOffsetX, defaultQualityBadgeOffsetY,
     defaultNetworkLogoOffsetX, defaultNetworkLogoOffsetY,
-    defaultBadgeGenre, defaultBadgeYear, defaultBadgeRating, defaultBadgeQuality, defaultCustomRatings, defaultCustomRatingEndpoint, defaultCustomRatingApiKeyHeader, defaultRatingSources,
+    defaultBadgeGenre, defaultBadgeYear, defaultBadgeRating, defaultBadgeQuality, defaultCustomRatings, defaultCustomRatingEndpoint, defaultCustomRatingApiKeyHeader, defaultRatingSources, defaultRatingPreset, defaultSashOrder,
     defaultAutoRotateClean, defaultAutoRotateBackdrop, defaultPortraitFitEnabled, defaultLandscapeFitEnabled, defaultNetworkLogo, defaultPreRelease, defaultRibbonSide, defaultPosterShape, defaultLogoAlign,
     episodeMetadataSource, defaultEpisodeMetadataSource,
     region, defaultRegion,
@@ -629,6 +637,16 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(defaultRatingSources) : v
       update({ defaultRatingSources: next })
     }, [defaultRatingSources, update])
+  const setDefaultRatingPreset = useCallback(
+    (v: RatingPreset | ((prev: RatingPreset) => RatingPreset)) => {
+      const next = typeof v === "function" ? v(defaultRatingPreset) : v
+      update({ defaultRatingPreset: next })
+    }, [defaultRatingPreset, update])
+  const setDefaultSashOrder = useCallback(
+    (v: SashBucket[] | ((prev: SashBucket[]) => SashBucket[])) => {
+      const next = typeof v === "function" ? v(defaultSashOrder) : v
+      update({ defaultSashOrder: next })
+    }, [defaultSashOrder, update])
   const setDefaultAutoRotateClean = useCallback(
     (v: boolean | ((prev: boolean) => boolean)) => {
       const next = typeof v === "function" ? v(defaultAutoRotateClean) : v
@@ -803,6 +821,10 @@ export function PosterEditorProvider({
       setDefaultCustomRatingApiKeyHeader,
       defaultRatingSources,
       setDefaultRatingSources,
+      defaultRatingPreset,
+      setDefaultRatingPreset,
+      defaultSashOrder,
+      setDefaultSashOrder,
       defaultAutoRotateClean,
       setDefaultAutoRotateClean,
       defaultAutoRotateBackdrop,
@@ -976,6 +998,8 @@ export function PosterEditorProvider({
       defaultCustomRatingEndpoint, setDefaultCustomRatingEndpoint,
       defaultCustomRatingApiKeyHeader, setDefaultCustomRatingApiKeyHeader,
       defaultRatingSources, setDefaultRatingSources,
+      defaultRatingPreset, setDefaultRatingPreset,
+      defaultSashOrder, setDefaultSashOrder,
       defaultAutoRotateClean, setDefaultAutoRotateClean,
       defaultAutoRotateBackdrop, setDefaultAutoRotateBackdrop,
       defaultPortraitFitEnabled, setDefaultPortraitFitEnabled,

@@ -15,7 +15,7 @@ import { fetchAllWikidata, matchTMDBStudios } from "@/lib/awards"
 import { createT } from "@/lib/i18n"
 import type { EnrichedAnimeItem } from "@/lib/validation"
 import { fetchMDBList, type MDBListEntry } from "@/lib/mdblist"
-import { fetchAggregatedRating, calculateAverageRating } from "@/lib/ratings"
+import { fetchAggregatedRating } from "@/lib/ratings"
 import { isImdbTop250 } from "@/lib/imdb-top250"
 import { getEffectiveRotationState, tryRotatePoster, getEffectiveBackdropRotationState, tryRotateBackdrop } from "@/lib/poster-rotation"
 import { getTMDBSessionCache, setTMDBSessionCache } from "@/lib/tmdb-session-cache"
@@ -67,6 +67,8 @@ import { createLogger } from "@/lib/logger"
 import { resolvePosterRenderConfig, resolvePosterShape } from "@/lib/poster-config"
 import { selectBestLogo, logoBestLogoFallbackReason } from "@/lib/logo-selection"
 import { resolveStreamQuality } from "@/lib/stream-quality"
+import { applyMinQuality, type StreamQuality } from "@/lib/quality-tiers"
+import { computeVote, parseRatingPreset } from "@/lib/rating-weights"
 import { combineAbortSignals } from "@/lib/abort-signal"
 import { createHash } from "node:crypto"
 import { fetchCustomRatings, resolveCustomRatingConfig, type RatingItem } from "@/lib/custom-rating"
@@ -467,6 +469,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   const reqRatingSources = qRsrc !== null
     ? qRsrc.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
     : (configOverride?.ratingSources ?? undefined)
+  // Preset pesi voto per il calcolo pre-config (stessa catena di poster-config:
+  // query `rw` > server defaults > "balanced"). Come badgeQualityEarly.
+  const reqRatingPreset = parseRatingPreset(req.nextUrl.searchParams.get("rw"))
+    ?? parseRatingPreset(sd.ratingPreset ?? null)
+    ?? "balanced"
   const t = createT(req.nextUrl.searchParams.get("lang") || mapping?.language || "it")
 
   if (queryPoster) {
@@ -945,16 +952,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           let wikidataTimer: ReturnType<typeof setTimeout> | undefined
           let wikidataTimedOut = false
           const wdStart = Date.now()
+          // Lo zombie SPARQL perso alla race viene abortito subito (stesso
+          // pattern di ratingAbort): senza, campava fino ai suoi 5s interni
+          // occupando uno slot del limiter awards (max 2).
+          const wdAbort = new AbortController()
           const wikidataTimeout = new Promise<typeof emptyWikidata>((r) => {
             wikidataTimer = setTimeout(() => { wikidataTimedOut = true; r(emptyWikidata) }, WIKIDATA_TIMEOUT)
           })
           const result = await Promise.race([
             rankingEnabledEarly
-              ? fetchAllWikidata(tmdbId, mediaType, t, renderAbort.signal).catch(() => emptyWikidata)
+              ? fetchAllWikidata(tmdbId, mediaType, t, combineAbortSignals(renderAbort.signal, wdAbort.signal)).catch(() => emptyWikidata)
               : Promise.resolve(emptyWikidata),
             wikidataTimeout,
           ])
           if (wikidataTimer) clearTimeout(wikidataTimer)
+          wdAbort.abort()
           // a. Osservabilità lotteria badge: esito + tempo + contenuto. Un
           // timeout qui = poster senza premi (per le serie, senza rete: nessun
           // badge) congelato in cache per ore — dal log si distingue subito un
@@ -1009,7 +1021,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         ratings.push({ id: "imdb", name: "IMDb", value: imdbRating, format: "decimal" })
       }
       if (!multiRatingOnly) {
-        const avgVote = calculateAverageRating(aggregated, reqRatingSources)
+        const avgVote = computeVote(aggregated, reqRatingPreset, reqRatingSources)
         if (typeof avgVote === "number" && avgVote > 0) voteAverage = avgVote
       }
       ratingAbort?.abort()
@@ -1122,7 +1134,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       badgeStyle, rankingBadgeStyle,
       blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, tintStrength,
       badgesEnabled, rankingEnabled,
-      badgeGenre, badgeYear, badgeRating, badgeQuality,
+      badgeGenre, badgeYear, badgeRating, badgeQuality, minQuality, ratingPreset, sashOrder,
       logoScale, logoOffsetX, logoOffsetY,
       topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
       genreBadgeScale, qualityBadgeScale, networkLogoScale,
@@ -1137,7 +1149,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     // avviene alla scadenza del TTL (6h non-mappati, 24h mappati).
     const applyPreRelease = preRelease && preReleaseDetected
 
-    const finalQuality = qQualityParam || liveQualityResult || null
+    // Soglia minima qualità all'uscita: la cache upstream (`resolveStreamQuality`)
+    // tiene sempre il raw — qui si sopprime solo il badge sotto soglia.
+    const finalQuality = applyMinQuality(
+      (qQualityParam || liveQualityResult || null) as StreamQuality | null,
+      minQuality,
+    )
 
     const locale = req.nextUrl.searchParams.get("lang") || mapping?.language || "it"
     const targetCenter = Math.round(30 * (isLandscape ? LAND_H : STD_H) / 570)
@@ -1172,7 +1189,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         keywords: [...tmdbKeywords],
         imdbTop250: !!imdbTop250,
       }
-      const badgeComputed = computeTopBadge(badgeInput, t, locale)
+      const badgeComputed = computeTopBadge(badgeInput, t, locale, sashOrder)
       log.info("Debug mode", { mediaType, tmdbId, imdbId, imdbTop250: !!imdbTop250, badge: badgeComputed.badge?.label ?? "null", vote: voteAverage, genre: genreName, quality: finalQuality })
       completePosterRender(null)
       return Response.json({
@@ -1192,8 +1209,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           backdrop: backdropPath,
         },
         genre: { name: genreName, year: releaseDate?.slice(0, 4) },
-        vote: { average: voteAverage },
+        vote: { average: voteAverage, preset: ratingPreset },
         quality: finalQuality,
+        minQuality,
         preRelease: { enabled: preRelease, detected: preReleaseDetected, applied: applyPreRelease, jwAvailable: preJw, digitalDate: preDigital, theatricalDate: releaseDate ?? mapping?.releaseDate ?? null },
         rankings: {
           justwatch: rankingResult,
@@ -1227,6 +1245,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
             badgeYear,
             badgeRating,
             badgeQuality,
+            sashOrder,
             customBadge: queryExtra,
           },
         },
@@ -1275,6 +1294,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, tintStrength,
       badgesEnabled, rankingEnabled, genreName, voteAverage, badgeStyle,
       rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality,
+      sashOrder,
       quality: finalQuality,
       topLight, targetCenter, ribbonSide,
       logoScale, logoOffsetX, logoOffsetY,

@@ -4,6 +4,9 @@ import path from "node:path"
 import { DATA_DIR } from "@/lib/data-dir"
 import { createLogger } from "@/lib/logger"
 import type { BadgeStyle, RankingBadgeStyle } from "@/lib/badge-styles"
+import type { StreamQuality } from "@/lib/quality-tiers"
+import type { RatingPreset } from "@/lib/rating-weights"
+import type { SashBucket } from "@/lib/badge-priority"
 import { isBadgeStyle, isRankingBadgeStyle } from "@/lib/badge-styles"
 import { normalizeRegion } from "@/lib/regions"
 import { envWithFallback } from "@/lib/env-compat"
@@ -26,6 +29,8 @@ export interface ServerDefaults {
   badgeYear?: boolean
   badgeRating?: boolean
   badgeQuality?: boolean
+  /** Soglia minima tier qualità streaming (SD < HD < FHD < 4K): sotto soglia niente badge. Default SD. */
+  minQuality?: StreamQuality
   /** Riga rating custom provider (display). Default ON quando il provider è configurato. */
   customRatings?: boolean
   /** Endpoint provider custom rating (UI). Non-segreto; la chiave resta solo env. */
@@ -33,6 +38,10 @@ export interface ServerDefaults {
   /** Header della chiave provider (UI). Default "X-API-Key". */
   customRatingApiKeyHeader?: string
   ratingSources?: string[]
+  /** Preset pesi voto (balanced = media pari attuale). Default "balanced". */
+  ratingPreset?: RatingPreset
+  /** Ordine/priorità sash (sottoinsieme ammesso: non listati = spenti). Default = ordine standard. */
+  sashOrder?: SashBucket[]
   autoRotateClean?: boolean
   defaultLogoFitEnabled?: boolean
   networkLogo?: boolean
@@ -123,6 +132,20 @@ function defaultsFromEnv(): ServerDefaults {
   if (cr !== undefined) d.customRatings = cr
   const rsrcEnv = getEnv("RATING_SOURCES")?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
   if (rsrcEnv && rsrcEnv.length > 0) d.ratingSources = rsrcEnv
+  const rwEnv = getEnv("RATING_PRESET")?.trim().toLowerCase()
+  if (rwEnv === "balanced" || rwEnv === "cinephile" || rwEnv === "series" || rwEnv === "raw") d.ratingPreset = rwEnv
+  // Ordine sash da env (stesso formato della query): token validi, dedup.
+  // Vuoto/invalido → ignorato (default). Array salvato via UI non toccato qui.
+  const sashEnv = getEnv("SASH_ORDER")?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+  if (sashEnv && sashEnv.length > 0) {
+    const valid = sashEnv.filter((s): s is SashBucket =>
+      s === "upcoming" || s === "rank" || s === "new" || s === "award" || s === "extra")
+    if (valid.length > 0) d.sashOrder = [...new Set(valid)]
+  }
+  // Soglia minima qualità (solo type-import da stream-quality: nessun ciclo
+  // di dipendenze runtime). Valori non validi → ignorati (default SD).
+  const qminRaw = getEnv("QUALITY_MIN")?.trim().toUpperCase()
+  if (qminRaw === "SD" || qminRaw === "HD" || qminRaw === "FHD" || qminRaw === "4K") d.minQuality = qminRaw
   if (blurEn !== undefined) d.blurEnabled = blurEn
   if (netLogo !== undefined) d.networkLogo = netLogo
   if (preRel !== undefined) d.preRelease = preRel

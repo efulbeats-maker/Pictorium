@@ -360,6 +360,11 @@ const RENDER_QUEUE_LIMIT = (() => {
 
 let activeRenders = 0
 let zombieRenders = 0
+// Picchi cumulativi da avvio processo (telemetria bench/produzione): il
+// polling esterno di /api/cache/status può mancare slot brevi, questi
+// contatori no (due interi, costo zero). Vedi getPosterStats().
+let peakActiveRenders = 0
+let peakQueuedRenders = 0
 const renderWaiters: Array<() => void> = []
 // Quante volte uno zombie ha superato la grazia ed è stato sganciato dal
 // budget slot (metrica cumulativa, esposta in getPosterStats).
@@ -423,6 +428,7 @@ export function recordZombieRenderStart(): () => void {
 export async function acquirePosterRenderSlot(): Promise<(() => void) | null> {
   if (activeRenders + zombieRenders < MAX_CONCURRENT_RENDERS) {
     activeRenders++
+    peakActiveRenders = Math.max(peakActiveRenders, activeRenders)
     return releaseRenderSlot
   }
   if (RENDER_QUEUE_LIMIT > 0 && renderWaiters.length >= RENDER_QUEUE_LIMIT) {
@@ -442,9 +448,11 @@ export async function acquirePosterRenderSlot(): Promise<(() => void) | null> {
       settled = true
       clearTimeout(timer)
       activeRenders++
+      peakActiveRenders = Math.max(peakActiveRenders, activeRenders)
       resolve(releaseRenderSlot)
     }
     renderWaiters.push(handoff)
+    peakQueuedRenders = Math.max(peakQueuedRenders, renderWaiters.length)
   })
 }
 
@@ -452,6 +460,8 @@ export async function acquirePosterRenderSlot(): Promise<(() => void) | null> {
 export function __resetPosterRenderLimiter(): void {
   activeRenders = 0
   zombieRenders = 0
+  peakActiveRenders = 0
+  peakQueuedRenders = 0
   renderWaiters.length = 0
   for (const t of pendingGraceTimers) clearTimeout(t)
   pendingGraceTimers.clear()
@@ -516,6 +526,8 @@ export function getPosterStats() {
     zombieRenders,
     zombieGraceExpired,
     queuedRenders: renderWaiters.length,
+    peakActiveRenders,
+    peakQueuedRenders,
     maxConcurrent: MAX_CONCURRENT_RENDERS,
   }
 }

@@ -486,6 +486,7 @@ export default function EditView() {
                         badgeQuality: ed.badgeQuality,
                         customRatings: ed.customRatings,
                         ratingSources: ed.ratingSources,
+                        ratingPreset: ed.defaultRatingPreset,
                         badgeStyle: ed.badgeStyle,
                         rankingBadgeStyle: ed.rankingBadgeStyle,
                         customBadge: ed.customBadge,

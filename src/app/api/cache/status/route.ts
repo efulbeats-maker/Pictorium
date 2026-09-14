@@ -27,6 +27,7 @@ export async function GET(req: NextRequest) {
       heapUsedMb: Math.round((procMem.heapUsed / (1024 * 1024)) * 10) / 10,
       heapTotalMb: Math.round((procMem.heapTotal / (1024 * 1024)) * 10) / 10,
       externalMb: Math.round((procMem.external / (1024 * 1024)) * 10) / 10,
+      arrayBuffersMb: Math.round(((procMem.arrayBuffers ?? 0) / (1024 * 1024)) * 10) / 10,
     },
     uptimeSeconds: Math.round(process.uptime()),
   }

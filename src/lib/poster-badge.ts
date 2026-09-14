@@ -3,7 +3,7 @@
  * Used by both the server route and client hooks, ensuring the same badge
  * logic applies in preview (WYSIWYG) and final poster.
  */
-import { computeBadge, computeAbsoluteCinema, type BadgeResult } from "./badge-priority"
+import { computeBadge, computeAbsoluteCinema, type BadgeResult, type SashBucket } from "./badge-priority"
 import { getAwardBadgeLabel, getNominationBadgeLabel } from "./awards"
 import { getUpcomingReleaseLabel } from "./release-badge"
 import { getSubGenreLabel } from "./subgenres"
@@ -103,7 +103,7 @@ export function isKDramaOrigin(originCountries: readonly string[] | undefined | 
  * Returns both the final badge and intermediate values so callers can
  * use them for save logic without recomputing.
  */
-export function computeTopBadge(input: BadgeInput, t: BadgeT, locale?: string): ComputedTopBadge {
+export function computeTopBadge(input: BadgeInput, t: BadgeT, locale?: string, order?: readonly SashBucket[] | null): ComputedTopBadge {
   const now = Date.now()
   const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000
   // Date FUTURE bug: con una data di uscita in avanti, (now - date) era negativo
@@ -167,7 +167,7 @@ export function computeTopBadge(input: BadgeInput, t: BadgeT, locale?: string): 
     isKDrama,
     imdbTop250: !!input.imdbTop250,
     extra: extraFallback,
-  }, t)
+  }, t, order)
 
   return {
     badge,

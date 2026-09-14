@@ -1120,7 +1120,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     })
     const {
       badgeStyle, rankingBadgeStyle,
-      blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness,
+      blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, tintStrength,
       badgesEnabled, rankingEnabled,
       badgeGenre, badgeYear, badgeRating, badgeQuality,
       logoScale, logoOffsetX, logoOffsetY,
@@ -1129,7 +1129,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
       networkLogoOffsetX, networkLogoOffsetY,
       queryExtra, qNetLogo, networkLogo, ribbonSide,
-      preRelease, posterShape, logoAlign,
+      preRelease, posterShape, logoAlign, hideLogo,
     } = renderConfig
 
     // Il rilevamento (`preReleaseDetected`) cambia nel tempo: non entra nella
@@ -1272,7 +1272,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       ratings: customRatingConfig.enabled ? [...new Map([...ratings, ...customRatings].map(item => [item.id, item])).values()] : undefined,
       posterBuf, logoFetch, backdropFetch: isLandscape ? null : backdropFetch,
       backdropScale, backdropOffsetX, backdropOffsetY,
-      blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness,
+      blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, tintStrength,
       badgesEnabled, rankingEnabled, genreName, voteAverage, badgeStyle,
       rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality,
       quality: finalQuality,
@@ -1293,6 +1293,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       accentOverride, imdbTop250, preRelease: applyPreRelease,
       shape: posterShape,
       logoAlign,
+      hideLogo,
       posterSrc: isLandscape ? backdropPath : posterPath,
       logoSrc: logoPath,
       backdropSrc: isLandscape ? null : backdropPath,

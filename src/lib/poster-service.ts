@@ -8,6 +8,7 @@ import {
   STD_W,
   STD_H,
   extractBadgeColor,
+  extractSceneTint,
   fitBadgeToCanvas,
   fitCompositeToCanvas,
   isValidHex,
@@ -73,6 +74,8 @@ export interface GenerationInput {
   blurIntensity: number
   blurFade: number
   blurDarkness: number
+  /** Intensità tinta di scena 0-100 (default 20, convertita in frazione per applyBlur). */
+  tintStrength?: number
 
   // Badge flags
   badgesEnabled: boolean
@@ -179,6 +182,12 @@ export interface GenerationInput {
    * badge e posizioni.
    */
   shape?: "poster" | "landscape"
+  /**
+   * Nasconde il logo film dal composite (il fetch resta per i colori accent).
+   * In landscape il logo è SEMPRE nascosto (layout senza baked-in: a valle
+   * tutto si comporta come "senza logo"); in portrait serve query esplicita.
+   */
+  hideLogo?: boolean
 }
 
 // ---- Vignette SVG cache (una entry per dimensioni canvas) ----
@@ -525,6 +534,8 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     posterBuf, logoFetch, backdropFetch,
     backdropScale, backdropOffsetX, backdropOffsetY,
     blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness,
+    // Default 20 quando il chiamante non lo passa (test diretti, vecchi adapter).
+    tintStrength = 20,
     badgesEnabled, rankingEnabled, genreName, voteAverage, badgeStyle,
     rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, quality,
     topLight, targetCenter, ribbonSide,
@@ -540,8 +551,9 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     lastAirDate, seasonCount, originCountries,
     wikidataResult, tmdbKeywords, locale, t,
     qLabel, queryExtra, qNetLogo, networkLogo, sd, accentOverride, imdbTop250,
-    posterSrc, logoSrc, backdropSrc,
+    logoSrc, backdropSrc,
     preRelease = false,
+    hideLogo = false,
     logoScrimDisabled,
     logoAlign,
     shape,
@@ -597,14 +609,38 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   const hasGenreBadge = badgesEnabled
     && ((genreAvailable && badgeGenre) || (ratingAvailable && badgeRating) || (yearAvailable && badgeYear))
 
-  const [blurOverlay, badgeColors, logoResult] = await Promise.all([
-    applyBlur({ posterBuf, blurEnabled, blurHeight, blurIntensity, blurFade, blurDarkness, canvasW: CW, canvasH: CH }),
-    hasGenreBadge
-      ? (accentOverride
-          ? Promise.resolve(accentOverride)
-          : resolveBadgeColors(posterBuf, logoFetch, genreName, posterSrc, logoSrc))
-      : Promise.resolve(undefined),
-    logoFetch
+  // Tinta di scena same-hue UNICA per badge + blur (coerenza dalla stessa
+  // radice). Niente crop per-zone: il bottom-40% falliva sui portrait con
+  // facce in basso (es. Silo: votava pelle/tuta #86642d invece dello
+  // smeraldo della scena). L'override `ac=` esplicito vince sempre; rete di
+  // sicurezza: fallback genere/grigio. resolveBadgeColors resta esportata e
+  // testata ma non è più sul path render.
+  const sceneTintHex = (blurEnabled || hasGenreBadge || rankingEnabled)
+    ? await extractSceneTint(posterBuf, genreName)
+    : null
+
+  const accentColorGenre = accentOverride?.genreColor ?? sceneTintHex ?? (GENRE_FALLBACK[genreName || ""] || "#555555")
+  const accentColorRank = accentOverride?.rankColor ?? sceneTintHex ?? "#555555"
+
+  // Override esplicito `ac=` vince sempre; poi tinta di scena; rete di sicurezza: fallback genere
+  const blurTintHex = accentOverride?.genreColor ?? sceneTintHex ?? accentColorGenre
+
+  // Layout landscape = senza logo baked-in (vale per preview, poster e
+  // banner: unica verità visiva). hideLogo esplicito copre anche il portrait.
+  const [blurOverlay, logoResult] = await Promise.all([
+    applyBlur({
+      posterBuf,
+      blurEnabled,
+      blurHeight,
+      blurIntensity,
+      blurFade,
+      blurDarkness,
+      tintStrength: tintStrength / 100,
+      canvasW: CW,
+      canvasH: CH,
+      accentColor: blurTintHex,
+    }),
+    logoFetch && !hideLogo && shape !== "landscape"
       ? (async () => {
           const lMeta = await sharp(logoFetch).metadata()
           const lw = lMeta.width || 200
@@ -618,11 +654,6 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
             logoScale: uScale, logoOffsetX: uOx, logoOffsetY: uOy,
             hasBadges: hasGenreBadge,
             align,
-            // Landscape 16:9: logo contenuto (max 40% larghezza, max 24%
-            // altezza — i loghi quadrati/multilinea non devono mangiarsi
-            // la scena) e sollevato sopra la fascia del badge genere
-            // (margine 25% invece di 10%) con calibrazione +55px su Y per compattezza.
-            ...(shape === "landscape" ? { maxWidthPct: 40, maxHeightPct: 24, bottomMarginPct: 25, topOffset: 55 } : {}),
           })
           const resized = await resizeLogoCached(logoFetch, layout.width, layout.height, logoSrc)
           const aW = resized.w
@@ -681,8 +712,6 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // -----------------------------------------------------------------------
   // 4. Badge computation
   // -----------------------------------------------------------------------
-  const accentColorGenre = badgeColors?.genreColor || (GENRE_FALLBACK[genreName || ""] || "#555555")
-  const accentColorRank = badgeColors?.rankColor || "#555555"
 
   const badgeInput: BadgeInput = {
     mediaType,
@@ -899,21 +928,34 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
 
   if (safeGenreBadgeResult) {
     const landscapeShiftX = shape === "landscape" ? -55 : 0
+    // Landscape: badge in basso a DESTRA invece che centrato (vale per
+    // preview, poster e banner — unica verità visiva). Il portrait resta storico.
+    // Micro-calibrazione ottica dell'ancoraggio destro: +40px verso il bordo,
+    // -10px verso l'alto (clamp anti-overflow: mai fuori canvas).
+    const anchorRight = shape === "landscape"
+    const anchorShiftX = anchorRight ? 40 : 0
+    const anchorShiftY = anchorRight ? -10 : 0
+    const rightPadX = Math.round(18 * CW / 380)
     if (badgeStyle === "bar") {
-      // In landscape la barra è resa a badgePw (non full-width): centrata
-      // come lower-third invece che ancorata a sinistra — ma in Cinematic
-      // Left segue il logo a sinistra.
-      const barLeft = (isLandscapeLeft
-        ? logoAlignPadX(CW) + genreBadgeOffsetX
-        : shape === "landscape" ? Math.round((CW - safeGenreBadgeResult.w) / 2) : 0) + landscapeShiftX
+      // In landscape la barra è resa a badgePw (non full-width): col banner
+      // va a destra come gli altri stili; altrimenti (portrait) resta
+      // full-width ancorata a sinistra. (Nel ramo false shape è di certo
+      // portrait per costruzione di anchorRight: niente ternario shape.)
+      const barLeft = anchorRight
+        ? Math.min(CW - safeGenreBadgeResult.w, Math.max(0, CW - safeGenreBadgeResult.w - rightPadX + anchorShiftX))
+        : (isLandscapeLeft
+          ? logoAlignPadX(CW) + genreBadgeOffsetX
+          : 0) + landscapeShiftX
       composites.push({ input: safeGenreBadgeResult.png, top: CH - safeGenreBadgeResult.h, left: barLeft })
     } else {
       // Offset solo stili centrati: la barra resta ancorata full-width.
       // In Cinematic Left la riga metadati sta sotto il logo a sinistra.
-      const badgeY = CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY
-      const badgeLeft = (isLandscapeLeft
-        ? logoAlignPadX(CW) + genreBadgeOffsetX
-        : Math.round((CW - safeGenreBadgeResult.w) / 2) + genreBadgeOffsetX) + landscapeShiftX
+      const badgeY = CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY + anchorShiftY
+      const badgeLeft = anchorRight
+        ? Math.min(CW - safeGenreBadgeResult.w, Math.max(0, CW - safeGenreBadgeResult.w - rightPadX + anchorShiftX + genreBadgeOffsetX))
+        : (isLandscapeLeft
+          ? logoAlignPadX(CW) + genreBadgeOffsetX
+          : Math.round((CW - safeGenreBadgeResult.w) / 2) + genreBadgeOffsetX) + landscapeShiftX
       composites.push({ input: safeGenreBadgeResult.png, top: badgeY, left: badgeLeft })
     }
   }

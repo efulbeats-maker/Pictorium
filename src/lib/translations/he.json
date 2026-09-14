@@ -638,5 +638,7 @@
   "ui.pinConfirmRemove": "אשר הסרה",
   "ui.pinSavedSuccess": "ה-PIN נשמר בהצלחה!",
   "ui.pinRemovedSuccess": "ה-PIN הוסר בהצלחה!",
-  "ui.pinSaveError": "שגיאה בעת השמירה"
+  "ui.pinSaveError": "שגיאה בעת השמירה",
+  "ui.minimal": "מינימלי",
+  "ui.tintStrength": "עוצמת הגוון"
 }

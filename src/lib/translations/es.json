@@ -638,5 +638,7 @@
   "ui.pinConfirmRemove": "Confirmar Eliminación",
   "ui.pinSavedSuccess": "¡PIN guardado con éxito!",
   "ui.pinRemovedSuccess": "¡PIN eliminado con éxito!",
-  "ui.pinSaveError": "Error al guardar"
+  "ui.pinSaveError": "Error al guardar",
+  "ui.minimal": "Minimal",
+  "ui.tintStrength": "Intensidad del tinte"
 }

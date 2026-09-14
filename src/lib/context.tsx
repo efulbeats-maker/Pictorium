@@ -170,6 +170,8 @@ export interface PictoriumCtx {
   showKey: boolean
   setShowKey: React.Dispatch<React.SetStateAction<boolean>>
   setTmdbKey: (v: string) => void
+  /** True se l'istanza ha una chiave TMDB env (booleano pubblico /api/defaults). */
+  serverHasTmdbKey: boolean
   mdblistApiKey: string
   setMdblistApiKey: (v: string) => void
   tvdbApiKey: string
@@ -316,6 +318,9 @@ export function usePictorium(): PictoriumCtx {
   const [lang, setLang] = useState("it")
   const t = useMemo(() => createT(lang), [lang])
   const [tmdbKey, setTmdbKeyState] = useState("")
+  // True se l'istanza ha una chiave TMDB env (booleano pubblico da
+  // /api/defaults): la home funziona anche senza chiave nel browser.
+  const [serverHasTmdbKey, setServerHasTmdbKey] = useState(false)
   const [mdblistApiKey, setMdblistApiKey] = useState("")
   const [tvdbApiKey, setTvdbApiKey] = useState("")
   const [tmdbKeyInput, setTmdbKeyInput] = useState("")
@@ -337,9 +342,9 @@ export function usePictorium(): PictoriumCtx {
 
   const navigation = useNavigation()
   const editorCtx = usePosterEditor()
-  const trending = useTrending(tmdbKey, mdblistApiKey, editorCtx.defaultRegion)
+  const trending = useTrending(tmdbKey, mdblistApiKey, editorCtx.defaultRegion, serverHasTmdbKey)
   const tmdbLang = getRegionDef(editorCtx.defaultRegion).lang
-  const search = useSearch(tmdbKey, tmdbLang)
+  const search = useSearch(tmdbKey, tmdbLang, serverHasTmdbKey)
   const { mappings, mappingsMap, loadMappings, removeMapping, exportData, importData } = useMappingsStore()
   const {
     // Badges
@@ -375,6 +380,7 @@ export function usePictorium(): PictoriumCtx {
     setRibbonSide,
     defaultBlurEnabled,
     defaultBlurIntensity,
+    defaultTintStrength,
     defaultBlurFade,
     defaultBlurDarkness,
     defaultGradientHeight,
@@ -391,6 +397,7 @@ export function usePictorium(): PictoriumCtx {
     // Blur
     blurEnabled, setBlurEnabled,
     blurIntensity, setBlurIntensity,
+    tintStrength, setTintStrength,
     blurFade, setBlurFade,
     blurDarkness, setBlurDarkness,
     // Gradient
@@ -584,6 +591,7 @@ export function usePictorium(): PictoriumCtx {
     fetch("/api/defaults")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (data?.hasInstanceKeys?.tmdbKey) setServerHasTmdbKey(true)
         if (!data?.serverKeys) return
         const { tmdbKey, mdblistApiKey: mdblistKey, tvdbApiKey: tvdbKey } = data.serverKeys
         if (!savedTmdb && tmdbKey) {
@@ -660,13 +668,13 @@ export function usePictorium(): PictoriumCtx {
     setUrlPattern(buildUrlPattern({
       globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle,
       badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources,
-      customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
+      customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
       topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
       genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
       networkLogoOffsetX, networkLogoOffsetY,
       tmdbKey, lang, mdblistApiKey,
     }))
-  }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
+    }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
 
   // --- Preview URL ---
   const buildPreviewUrlCb = useCallback(() => {
@@ -682,14 +690,14 @@ export function usePictorium(): PictoriumCtx {
         topEdgeColor, accentColor, lang, tmdbKey,
         region: editorCtx.defaultRegion,
       },
-      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
+      { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
     )
     setPreviewUrl(url)
   }, [navigation.selected, navigation.previewPoster, navigation.selectedLogo, selectedBackdrop,
     logoScale, logoOffsetX, logoOffsetY, backdropScale, backdropOffsetX, backdropOffsetY,
     metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, accentColor, lang, tmdbKey,
     editorCtx.defaultRegion,
-    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
+    globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
 
   // A1: trailing debounce della preview URL (200ms). Ogni tick di slider
   // cambia l'identità di buildPreviewUrlCb → senza debounce ogni pixel di
@@ -710,7 +718,17 @@ export function usePictorium(): PictoriumCtx {
   }, [navigation.selected, buildPreviewUrlCb])
 
   // --- Color detection ---
-  useRootColors(navigation.previewPoster, metaInfo.genres[0]?.name, posterUrl, { setAccentColor, setAutoAccentColor, setTopEdgeColor })
+  // In landscape la base è il backdrop: accent/topLight auto si campionano
+  // da lì (w780, tier backdrop), come fa il server sulla stessa immagine —
+  // altrimenti `ac=`/`tl=` in preview contraddicono il render.
+  const landscapePreview = posterShape === "landscape"
+  useRootColors(
+    landscapePreview ? (selectedBackdrop ?? navigation.previewPoster) : navigation.previewPoster,
+    metaInfo.genres[0]?.name,
+    posterUrl,
+    { setAccentColor, setAutoAccentColor, setTopEdgeColor },
+    landscapePreview ? "w780" : "w342",
+  )
 
   // --- Caricamento dati item corrente (M16) ---
   // Condiviso tra openPosterBrowser e l'effetto cambio lingua: ricarica
@@ -781,7 +799,7 @@ export function usePictorium(): PictoriumCtx {
         return
       }
     }
-    if (!navigation.selected || !tmdbKey) return
+    if (!navigation.selected || (!tmdbKey && !serverHasTmdbKey)) return
     const itemId = navigation.selected.id
     const itemType = navigation.selected.media_type
     const mdblistParam = mdblistApiKey ? "&mdblist_key=" + encodeURIComponent(mdblistApiKey) : ""
@@ -806,7 +824,7 @@ export function usePictorium(): PictoriumCtx {
 
   // --- Poster image refresh ---
   useEffect(() => {
-    if (!navigation.selected || !tmdbKey) return
+    if (!navigation.selected || (!tmdbKey && !serverHasTmdbKey)) return
     const item = navigation.selected
     const fetchId = navigation.incrementFetchId()
     // M16: riusa loadCurrentItemData così al cambio lingua si ricaricano anche
@@ -905,6 +923,7 @@ export function usePictorium(): PictoriumCtx {
       setNetworkLogoOffsetX(eff?.networkLogoOffsetX ?? defaultNetworkLogoOffsetX)
       setNetworkLogoOffsetY(eff?.networkLogoOffsetY ?? defaultNetworkLogoOffsetY)
       setBlurIntensity(eff?.blurIntensity ?? defaultBlurIntensity)
+      setTintStrength(eff?.tintStrength ?? defaultTintStrength)
       setBlurFade(eff?.blurFade ?? defaultBlurFade)
       setBlurDarkness(eff?.blurDarkness ?? defaultBlurDarkness)
       setBlurEnabled(eff?.blurEnabled ?? defaultBlurEnabled)
@@ -933,6 +952,7 @@ export function usePictorium(): PictoriumCtx {
       setCustomRatings(defaultCustomRatings)
       setGradientHeight(defaultGradientHeight)
       setBlurIntensity(defaultBlurIntensity)
+      setTintStrength(defaultTintStrength)
       setBlurFade(defaultBlurFade)
       setBlurDarkness(defaultBlurDarkness)
       setBlurEnabled(defaultBlurEnabled)
@@ -1047,7 +1067,7 @@ export function usePictorium(): PictoriumCtx {
     setBackdropScale, setBackdropOffsetX, setBackdropOffsetY,
     globalBadges, rankingBadges, customBadge, badgeStyle, rankingBadgeStyle,
     badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings,
-    defaultBadgeStyle, defaultRankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, gradientHeight,
+    defaultBadgeStyle, defaultRankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, tintStrength, gradientHeight,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
     genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
     networkLogoOffsetX, networkLogoOffsetY,
@@ -1090,9 +1110,11 @@ export function usePictorium(): PictoriumCtx {
     prefetchedRef.current.add(key)
     const rLang = getRegionDef(editorCtx.defaultRegion).lang
     const langs = `${lang},en,null`
+    // Senza chiave da nessuna parte evita prefetch destinati al 401.
+    if (!tmdbKey && !serverHasTmdbKey) return
     http(`/api/tmdb/${item.id}/details?type=${item.media_type}&language=${rLang}&api_key=${tmdbKey}`, { timeout: 15000, retries: 0 }).catch(() => null)
     http(`/api/tmdb/${item.id}/images?type=${item.media_type}&languages=${langs}&api_key=${tmdbKey}`, { timeout: 15000, retries: 0 }).catch(() => null)
-  }, [tmdbKey, lang, editorCtx.defaultRegion])
+  }, [tmdbKey, serverHasTmdbKey, lang, editorCtx.defaultRegion])
 
   return useMemo(() => ({
     selected: navigation.selected, setSelected: navigation.setSelected,
@@ -1129,6 +1151,7 @@ export function usePictorium(): PictoriumCtx {
     showLangPicker, setShowLangPicker,
     tmdbKeyInput, setTmdbKeyInput,
     showKey, setShowKey, setTmdbKey,
+    serverHasTmdbKey,
     mdblistApiKey, setMdblistApiKey: setMdblistApiKeyFn,
     tvdbApiKey, setTvdbApiKey: setTvdbApiKeyFn,
     exportData, importData, removeRecentSearch: search.removeRecentSearch, clearRecentSearches: search.clearRecentSearches,
@@ -1159,6 +1182,7 @@ export function usePictorium(): PictoriumCtx {
     mappings,
     langOpen, settingsOpen, showLangPicker,
     tmdbKeyInput, showKey, copied, mdblistApiKey, tvdbApiKey,
+    serverHasTmdbKey,
     accentColor, autoAccentColor, setAccentColor,
     topEdgeColor, autoSaveExcludedPosters, autoSaveExcludedBackdrops, prefetchTitle,
     trending.trending, trending.trendingError, trending.streamingCharts, trending.mdblistAnimeList,

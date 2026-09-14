@@ -158,4 +158,50 @@ describe("buildStremioPosterUrl", () => {
     expect(forced.searchParams.get("gradHeight")).toBe("15")
     expect(forced.searchParams.get("shape")).toBe("landscape")
   })
+
+  it("emits hideLogo only for the Nuvio banner (never for poster)", () => {
+    const base = {
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: {},
+      mapping: mapping("2026-07-16T10:15:30.000Z"),
+    }
+    const poster = buildStremioPosterUrl(base)
+    expect(poster.searchParams.has("hideLogo")).toBe(false)
+
+    const banner = buildStremioPosterUrl({ ...base, forceShape: "landscape", hideLogo: true })
+    expect(banner.searchParams.get("hideLogo")).toBe("1")
+    expect(banner.searchParams.get("shape")).toBe("landscape")
+  })
+
+  it("passes per-title tintStrength to the banner, defaults to 20", () => {
+    const base = {
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: {},
+      mapping: { ...mapping("2026-07-16T10:15:30.000Z"), tintStrength: 55 },
+    }
+    expect(buildStremioPosterUrl(base).searchParams.get("tint")).toBe("55")
+    expect(buildStremioPosterUrl({ ...base, mapping: null }).searchParams.get("tint")).toBe("20")
+  })
+
+  it("defaults blurFade to 70 in landscape, 60 in portrait", () => {
+    const base = {
+      origin: "http://localhost:3000",
+      type: "movie" as const,
+      id: 42,
+      defaults: {},
+      mapping: null,
+    }
+    expect(buildStremioPosterUrl(base).searchParams.get("bf")).toBe("50")
+    expect(buildStremioPosterUrl({ ...base, forceShape: "landscape" }).searchParams.get("bf")).toBe("70")
+    // Mapping esplicito vince sul default di formato.
+    expect(buildStremioPosterUrl({
+      ...base,
+      forceShape: "landscape",
+      mapping: { ...mapping("2026-07-16T10:15:30.000Z"), blurFade: 40 },
+    }).searchParams.get("bf")).toBe("40")
+  })
 })

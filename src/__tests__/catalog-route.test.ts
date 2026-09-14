@@ -100,9 +100,11 @@ describe("GET /catalog/[type]/[id]", () => {
     expect(res.status).toBe(200)
     expect(body.metas[0].banner).toContain("/api/poster/series/94997")
     expect(body.metas[0].banner).toContain("shape=landscape")
+    expect(body.metas[0].banner).toContain("hideLogo=1")
     expect(body.metas[0].banner).toContain(`rv=${POSTER_URL_VERSION}`)
     // Il poster resta portrait per i client verticali (nessun mapping salvato).
     expect(body.metas[0].poster).not.toContain("shape=landscape")
+    expect(body.metas[0].poster).not.toContain("hideLogo")
     expect(body.metas[0].posterShape).toBe("poster")
   })
 

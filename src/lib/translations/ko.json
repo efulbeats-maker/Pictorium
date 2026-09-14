@@ -638,5 +638,7 @@
   "ui.pinConfirmRemove": "제거 확인",
   "ui.pinSavedSuccess": "PIN이 성공적으로 저장되었습니다!",
   "ui.pinRemovedSuccess": "PIN이 성공적으로 제거되었습니다!",
-  "ui.pinSaveError": "저장 중 오류가 발생했습니다"
+  "ui.pinSaveError": "저장 중 오류가 발생했습니다",
+  "ui.minimal": "미니멀",
+  "ui.tintStrength": "틴트 강도"
 }

@@ -27,6 +27,12 @@ export interface BuildStremioPosterUrlInput {
    * Pictorium invece del backdrop TMDB grezzo.
    */
   readonly forceShape?: PosterShape
+  /**
+   * Nasconde il logo film dal composite. Usato dal banner Nuvio insieme a
+   * forceShape (vedi sopra): senza, il baked-in duplicherebbe l'overlay logo
+   * che Nuvio applica da catalogo.
+   */
+  readonly hideLogo?: boolean
 }
 
 export function mappingVersionParam(mapping: Mapping | null | undefined): string | null {
@@ -93,13 +99,19 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
     networkLogoOffsetY: eff?.networkLogoOffsetY ?? input.defaults.networkLogoOffsetY,
     gradientHeight: eff?.gradientHeight ?? input.defaults.gradientHeight,
     blurIntensity: eff?.blurIntensity ?? input.defaults.blurIntensity,
-    blurFade: eff?.blurFade ?? input.defaults.blurFade,
+    // Default sfumatura dedicato al formato (come logoAlign): in landscape
+    // serve una transizione più lunga; il portrait resta sul default globale.
+    blurFade: eff?.blurFade ?? ((input.forceShape ?? mapping?.posterShape ?? input.defaults.posterShape) === "landscape" ? 70 : input.defaults.blurFade),
     blurDarkness: eff?.blurDarkness ?? input.defaults.blurDarkness,
     blurEnabled: eff?.blurEnabled ?? input.defaults.blurEnabled,
+    tintStrength: eff?.tintStrength ?? input.defaults.tintStrength,
     customBadge,
     title: mapping?.title ?? undefined,
     networkLogo: (input.defaults.networkLogo !== false) && (mapping?.networkLogo !== false),
     preRelease: input.defaults.preRelease,
+    // hideLogo viaggia solo sul banner (il chiamante lo imposta insieme a
+    // forceShape): poster/preview/Stremio non lo vedono mai.
+    hideLogo: input.hideLogo,
     // ribbonSide solo globale: i mapping storici con valore salvato lo ignorano.
     ribbonSide: input.defaults.ribbonSide,
     // Formato canvas: per-titolo vince sul default globale (come gli altri

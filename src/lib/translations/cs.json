@@ -638,5 +638,7 @@
   "ui.pinConfirmRemove": "Potvrdit odebrání",
   "ui.pinSavedSuccess": "PIN úspěšně uložen!",
   "ui.pinRemovedSuccess": "PIN úspěšně odebrán!",
-  "ui.pinSaveError": "Chyba při ukládání"
+  "ui.pinSaveError": "Chyba při ukládání",
+  "ui.minimal": "Minimální",
+  "ui.tintStrength": "Síla odstínu"
 }

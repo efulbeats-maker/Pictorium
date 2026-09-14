@@ -93,13 +93,15 @@ type GenreTextFlowArgs = GenreBadgeText & {
   readonly centerX: number
   readonly y: number
   readonly parts?: GenreParts
+  readonly style?: string
 }
 
-export function genreBadgeSvgDims(fs: number, genreName: string, voteStr: string, yearStr: string, parts?: GenreParts) {
+export function genreBadgeSvgDims(fs: number, genreName: string, voteStr: string, yearStr: string, parts?: GenreParts, style?: string) {
+  const isMinimal = style === "minimal"
   const opts = normalizeParts(parts)
   const gap = Math.round(fs / 3)
   const gapStar = Math.round(fs / 6)
-  const bulletW = Math.round(fs * 0.35)
+  const bulletW = isMinimal ? Math.round(fs * 0.28) : Math.round(fs * 0.35)
   const starW = Math.round(fs * 0.92)
   const genreW = (opts.showGenre && genreName) ? estimateTextWidth(genreName, fs) : 0
   const voteW = (opts.showRating && voteStr) ? estimateTextWidth(voteStr, fs) : 0
@@ -119,14 +121,17 @@ export function genreBadgeSvgDims(fs: number, genreName: string, voteStr: string
   return { starW, gap, gapStar, totalW, svgH, genreW, voteW, yearW, bulletW, textContentW }
 }
 
-function buildGenreTextFlow({ genreName, voteStr, yearStr, fs, centerX, y, parts }: GenreTextFlowArgs) {
+function buildGenreTextFlow({ genreName, voteStr, yearStr, fs, centerX, y, parts, style }: GenreTextFlowArgs) {
+  const isMinimal = style === "minimal"
   const opts = normalizeParts(parts)
-  const dims = genreBadgeSvgDims(fs, genreName, voteStr, yearStr, opts)
+  const dims = genreBadgeSvgDims(fs, genreName, voteStr, yearStr, opts, style)
   const starDy = Math.max(2, Math.round(fs * 0.14))
   const hasGenre = opts.showGenre && !!genreName
   const hasRating = opts.showRating && !!voteStr
   const hasYear = opts.showYear && !!yearStr
-  const bullet = (dx: number) => `<tspan dx="${dx}" fill-opacity="0.6">${escSvg("\u2022")}</tspan>`
+  const bullet = (dx: number) => isMinimal
+    ? `<tspan dx="${dx}" fill-opacity="0.45">|</tspan>`
+    : `<tspan dx="${dx}" fill-opacity="0.6">${escSvg("\u2022")}</tspan>`
   const tspan: string[] = []
   // Il dx di separazione va emesso SOLO se il segmento ha un precedente visibile:
   // quando stella o anno sono il PRIMO segmento (es. solo anno, solo voto) il dx
@@ -187,17 +192,21 @@ export function buildGenrePillSvg(genreName: string, voteStr: string, yearStr: s
 }
 
 export function buildGenreTextSvg(genreName: string, voteStr: string, yearStr: string, fs: number, textColor: string, style: string, textOffsetX = 0, parts?: GenreParts) {
-  const dims = genreBadgeSvgDims(fs, genreName, voteStr, yearStr, parts)
-  const shadowPad = style === "shadow" ? 8 : 0
-  const shadowDrop = style === "shadow" ? 5 : 0
+  const isMinimal = style === "minimal"
+  const dims = genreBadgeSvgDims(fs, genreName, voteStr, yearStr, parts, style)
+  const shadowPad = style === "shadow" ? 8 : (isMinimal ? 2 : 0)
+  const shadowDrop = style === "shadow" ? 5 : (isMinimal ? 1 : 0)
   const safePad = genreBadgeSafePad(fs)
   const renderW = dims.totalW + shadowPad * 2 + safePad * 2
   const renderH = dims.svgH + shadowDrop
-  const textParts = buildGenreTextFlow({ genreName, voteStr, yearStr, fs, centerX: renderW / 2 + textOffsetX, y: shadowDrop + dims.svgH / 2, parts })
+  const textParts = buildGenreTextFlow({ genreName, voteStr, yearStr, fs, centerX: renderW / 2 + textOffsetX, y: shadowDrop + dims.svgH / 2, parts, style })
   let defs = ""
   let filterAttr = ""
   if (style === "shadow") {
     defs = `<defs><filter id="sh" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-color="rgba(0,0,0,0.8)"/><feDropShadow dx="0" dy="5" stdDeviation="4.5" flood-color="rgba(0,0,0,0.55)"/></filter></defs>`
+    filterAttr = ' filter="url(#sh)"'
+  } else if (isMinimal) {
+    defs = `<defs><filter id="sh" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1" stdDeviation="1" flood-color="rgba(0,0,0,0.7)"/></filter></defs>`
     filterAttr = ' filter="url(#sh)"'
   }
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${renderW}" height="${renderH}">${defs}<g fill="${textColor}"${filterAttr}>${textParts}</g></svg>`

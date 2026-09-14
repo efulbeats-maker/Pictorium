@@ -67,6 +67,8 @@ export interface PosterEditorCtx {
   setDefaultBlurEnabled: (v: boolean | ((prev: boolean) => boolean)) => void
   defaultBlurIntensity: number
   setDefaultBlurIntensity: (v: number | ((prev: number) => number)) => void
+  defaultTintStrength: number
+  setDefaultTintStrength: (v: number | ((prev: number) => number)) => void
   defaultBlurFade: number
   setDefaultBlurFade: (v: number | ((prev: number) => number)) => void
   defaultBlurDarkness: number
@@ -148,6 +150,9 @@ export interface PosterEditorCtx {
   setBlurEnabled: (v: boolean | ((prev: boolean) => boolean)) => void
   blurIntensity: number
   setBlurIntensity: (v: number | ((prev: number) => number)) => void
+  /** Intensità tinta di scena 0-100 (default 20). */
+  tintStrength: number
+  setTintStrength: (v: number | ((prev: number) => number)) => void
   blurFade: number
   setBlurFade: (v: number | ((prev: number) => number)) => void
   blurDarkness: number
@@ -281,14 +286,14 @@ export function PosterEditorProvider({
   const {
     globalBadges, rankingBadges, networkLogo, preRelease, ribbonSide, posterShape, logoAlign,
     badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources,
-    gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled,
+    gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
     genreBadgeScale, qualityBadgeScale, networkLogoScale,
     genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
     networkLogoOffsetX, networkLogoOffsetY,
     badgeStyle, rankingBadgeStyle,
     defaultBadgeStyle, defaultRankingBadgeStyle,
-    defaultBlurEnabled, defaultBlurIntensity, defaultBlurFade, defaultBlurDarkness,
+    defaultBlurEnabled, defaultBlurIntensity, defaultBlurFade, defaultBlurDarkness, defaultTintStrength,
     defaultGradientHeight, defaultGlobalBadges, defaultRankingBadges,
     defaultTopBadgeScale, defaultTopBadgeOffsetX, defaultTopBadgeOffsetY,
     defaultGenreBadgeScale, defaultQualityBadgeScale, defaultNetworkLogoScale,
@@ -362,6 +367,9 @@ export function PosterEditorProvider({
       update({
         posterShape: next,
         logoAlign: next === "landscape" ? (defaultLogoAlign ?? "left") : "center",
+        // Default sfumatura dedicato al formato (come logoAlign): in landscape
+        // serve una transizione più lunga; il portrait resta sul valore corrente.
+        ...(next === "landscape" ? { blurFade: 70 } : {}),
       })
     }, [posterShape, update, defaultLogoAlign])
   // Regola di split corrente/default (vale per TUTTI i setter di questo file):
@@ -441,6 +449,11 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(blurIntensity) : v
       update({ blurIntensity: next })
     }, [blurIntensity, update])
+  const setTintStrength = useCallback(
+    (v: number | ((prev: number) => number)) => {
+      const next = typeof v === "function" ? v(tintStrength) : v
+      update({ tintStrength: next })
+    }, [tintStrength, update])
   const setBlurFade = useCallback(
     (v: number | ((prev: number) => number)) => {
       const next = typeof v === "function" ? v(blurFade) : v
@@ -486,6 +499,11 @@ export function PosterEditorProvider({
       const next = typeof v === "function" ? v(defaultBlurIntensity) : v
       update({ defaultBlurIntensity: next })
     }, [defaultBlurIntensity, update])
+  const setDefaultTintStrength = useCallback(
+    (v: number | ((prev: number) => number)) => {
+      const next = typeof v === "function" ? v(defaultTintStrength) : v
+      update({ defaultTintStrength: next })
+    }, [defaultTintStrength, update])
   const setDefaultBlurFade = useCallback(
     (v: number | ((prev: number) => number)) => {
       const next = typeof v === "function" ? v(defaultBlurFade) : v
@@ -733,6 +751,8 @@ export function PosterEditorProvider({
       setDefaultBlurEnabled,
       defaultBlurIntensity,
       setDefaultBlurIntensity,
+      defaultTintStrength,
+      setDefaultTintStrength,
       defaultBlurFade,
       setDefaultBlurFade,
       defaultBlurDarkness,
@@ -810,6 +830,8 @@ export function PosterEditorProvider({
       setBlurEnabled,
       blurIntensity,
       setBlurIntensity,
+      tintStrength,
+      setTintStrength,
       blurFade,
       setBlurFade,
       blurDarkness,
@@ -919,6 +941,7 @@ export function PosterEditorProvider({
       defaultEpisodeMetadataSource, setDefaultEpisodeMetadataSource,
       defaultBlurEnabled, setDefaultBlurEnabled,
       defaultBlurIntensity, setDefaultBlurIntensity,
+      defaultTintStrength, setDefaultTintStrength,
       defaultBlurFade, setDefaultBlurFade,
       defaultBlurDarkness, setDefaultBlurDarkness,
       defaultGradientHeight, setDefaultGradientHeight,
@@ -967,6 +990,7 @@ export function PosterEditorProvider({
       // Blur
       blurEnabled, setBlurEnabled,
       blurIntensity, setBlurIntensity,
+      tintStrength, setTintStrength,
       blurFade, setBlurFade,
       blurDarkness, setBlurDarkness,
 

@@ -7,7 +7,7 @@
 
 import { useEffect } from "react"
 import type { TMDBImage } from "./types"
-import { findAccentColor, topEdgeAverage } from "./accent-color"
+import { findSceneTint, topEdgeAverage } from "./accent-color"
 
 interface RootColorsSetters {
   setAccentColor: (v: string | null) => void
@@ -20,6 +20,7 @@ export function useRootColors(
   genreName: string | undefined,
   posterUrl: (path: string, size?: string) => string,
   { setAccentColor, setAutoAccentColor, setTopEdgeColor }: RootColorsSetters,
+  size = "w342",
 ): void {
   useEffect(() => {
     const root = document.documentElement
@@ -38,7 +39,7 @@ export function useRootColors(
     // quindi la stessa URL è valida per il browser cache tra un poster e
     // l'altro (l'effetto gira solo al cambio poster). Prima ogni cambio
     // riscaricava il w342 anche se già in cache.
-    const url = posterUrl(previewPoster.file_path, "w342")
+    const url = posterUrl(previewPoster.file_path, size)
     const img = new Image()
     img.crossOrigin = "anonymous"
     const setRootColors = (r: number, g: number, b: number, edgeR: number, edgeG: number, edgeB: number) => {
@@ -68,7 +69,11 @@ export function useRootColors(
         ctx.imageSmoothingEnabled = false
         ctx.drawImage(img, 0, 0, w, h)
         const pixels = ctx.getImageData(0, 0, w, h).data
-        const result = findAccentColor(pixels, w, h, genreName || '')
+        // Stessa semantica del server (extractSceneTint su intero thumb):
+        // l'auto accent deve coincidere con la tinta usata dal render,
+        // altrimenti l'override `ac=` esplicito in preview contraddice
+        // il server (es. Silo verde -> rosa complementare). Niente logo.
+        const result = findSceneTint(pixels, w, h, genreName || '')
         const edge = topEdgeAverage(pixels, w, h)
 
         setRootColors(result.r, result.g, result.b, edge.r, edge.g, edge.b)
@@ -80,5 +85,5 @@ export function useRootColors(
     // La semantica dell'effetto originale: gira solo quando cambia il poster
     // (genreName è letto dalla closure, non è una dependency).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewPoster])
+  }, [previewPoster, size])
 }

@@ -263,6 +263,14 @@ test.describe("poster API — functional", () => {
     expect(buffer.length).toBeGreaterThan(1000)
   })
 
+  test("badge style: minimal — valid image", async ({ request }) => {
+    const url = posterUrl({ genreName: "Action", voteAverage: "7.8", bs: "minimal", badges: "1", ranking: "0" })
+    const res = await request.get(url)
+    expect(res.ok()).toBeTruthy()
+    const buffer = await res.body()
+    expect(buffer.length).toBeGreaterThan(1000)
+  })
+
   test("ranking style: pill — valid image", async ({ request }) => {
     const url = posterUrl({ genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "1", rank: "2", label: "Top 2", rs: "pill" })
     const res = await request.get(url)
@@ -401,6 +409,12 @@ test.describe("poster API — visual regression", () => {
     await expect(poster).toHaveScreenshot("poster-vetro.png", { maxDiffPixelRatio: 0.10 })
   })
 
+  test("minimal badge — screenshot", async ({ page }) => {
+    const url = posterUrl({ genreName: "Action", voteAverage: "7.8", bs: "minimal", badges: "1", ranking: "0" })
+    const poster = await renderPoster(page, url)
+    await expect(poster).toHaveScreenshot("poster-minimal.png", { maxDiffPixelRatio: 0.10 })
+  })
+
   test("ranking pill — screenshot", async ({ page }) => {
     const url = posterUrl({ genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "1", rank: "3", label: "Top 3", rs: "pill" })
     const poster = await renderPoster(page, url)
@@ -495,5 +509,13 @@ test.describe("poster API — visual regression", () => {
     const url = posterUrl({ backdrop: "/mocked/backdrop.jpg", shape: "landscape", genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "1", rank: "3", label: "Top 3", rs: "pill" })
     const poster = await renderPoster(page, url)
     await expect(poster).toHaveScreenshot("poster-landscape-rank.png", { maxDiffPixelRatio: 0.10 })
+  })
+
+  test("landscape omits baked-in logo, genre badge bottom-right - screenshot", async ({ page }) => {
+    // Layout landscape senza baked-in (preview, poster e banner): niente logo
+    // film anche se passato via query, badge genere a destra.
+    const url = posterUrl({ backdrop: "/mocked/backdrop.jpg", logo: "/mocked/logo.png", shape: "landscape", genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "0" })
+    const poster = await renderPoster(page, url)
+    await expect(poster).toHaveScreenshot("poster-landscape-nologo.png", { maxDiffPixelRatio: 0.10 })
   })
 })

@@ -70,6 +70,8 @@ export interface PosterRenderConfig {
   blurIntensity: number
   blurFade: number
   blurDarkness: number
+  /** Intensità tinta di scena 0-100 (default 20). */
+  tintStrength: number
   badgesEnabled: boolean
   rankingEnabled: boolean
   /** Quali componenti del badge genere/rating mostrare (default tutti ON). */
@@ -110,6 +112,12 @@ export interface PosterRenderConfig {
   preRelease: boolean
   /** Formato canvas (query `shape` > mapping > config > defaults > "poster"). */
   posterShape: PosterShape
+  /**
+   * Nasconde il logo film dal composite (solo query `hideLogo`, default false).
+   * Veicolo del banner Nuvio: Nuvio sovrappone già il logo da catalogo, il
+   * baked-in creerebbe un doppione. Il fetch resta per i colori accent.
+   */
+  hideLogo: boolean
   /**
    * Allineamento blocco logo/metadati — precedenza: query `align` > server
    * defaults > default di formato (landscape "left", poster "center").
@@ -182,19 +190,33 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     ? clamp(rawBlur, 1, 100)
     : (m?.blurIntensity != null && Number.isFinite(m.blurIntensity)
         ? clamp(m.blurIntensity, 1, 100)
-        : (configOverride !== null ? clamp(configOverride.blurIntensity, 1, 100) : 5))
+        : (configOverride !== null ? clamp(configOverride.blurIntensity, 1, 100) : 20))
   const rawBf = q.get("bf") ? Number(q.get("bf")) : NaN
   const blurFade = Number.isFinite(rawBf)
     ? clamp(rawBf, 0, 100)
     : (m?.blurFade != null && Number.isFinite(m.blurFade)
         ? clamp(m.blurFade, 0, 100)
-        : (configOverride !== null ? clamp(configOverride.blurFade, 0, 100) : 60))
+        : (configOverride !== null ? clamp(configOverride.blurFade, 0, 100) : (posterShape === "landscape" ? 70 : 50)))
   const rawBd = q.get("bd") ? Number(q.get("bd")) : NaN
   const blurDarkness = Number.isFinite(rawBd)
     ? clamp(rawBd, 0, 100)
     : (m?.blurDarkness != null && Number.isFinite(m.blurDarkness)
         ? clamp(m.blurDarkness, 0, 100)
-        : (configOverride !== null ? clamp(configOverride.blurDarkness, 0, 100) : 40))
+        : (configOverride !== null ? clamp(configOverride.blurDarkness, 0, 100) : 30))
+
+  // Intensità tinta 0-100 — stessa catena (query > mapping > config >
+  // server defaults > 20). Nessun profilo landscape dedicato: vale per
+  // entrambi i canvas (vedi types.ts).
+  const rawTint = q.get("tint") ? Number(q.get("tint")) : NaN
+  const tintStrength = q.get("tint") !== null
+    ? (Number.isFinite(rawTint) ? clamp(Math.round(rawTint), 0, 100) : 20)
+    : (m?.tintStrength != null && Number.isFinite(m.tintStrength)
+        ? clamp(Math.round(m.tintStrength), 0, 100)
+        : (configOverride?.tintStrength != null && Number.isFinite(configOverride.tintStrength)
+            ? clamp(Math.round(configOverride.tintStrength), 0, 100)
+            : (sd.tintStrength != null && Number.isFinite(sd.tintStrength)
+                ? clamp(Math.round(sd.tintStrength), 0, 100)
+                : 20)))
 
   const qBadges = q.get("badges")
   const qRanking = q.get("ranking")
@@ -371,6 +393,11 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const qPre = q.get("pre")
   const preRelease = qPre !== null ? qPre !== "0" : (configOverride?.preRelease ?? sd.preRelease ?? false)
 
+  // Nascondi logo film: solo query `hideLogo=1` (banner Nuvio), default false.
+  // Nessuna catena mapping/config: non esiste il concetto per-titolo/globale.
+  const qHideLogo = q.get("hideLogo")
+  const hideLogo = qHideLogo !== null ? qHideLogo !== "0" : false
+
   return {
     badgeStyle,
     rankingBadgeStyle,
@@ -379,6 +406,7 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     blurIntensity,
     blurFade,
     blurDarkness,
+    tintStrength,
     badgesEnabled,
     rankingEnabled,
     badgeGenre,
@@ -409,5 +437,6 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     preRelease,
     posterShape,
     logoAlign,
+    hideLogo,
   }
 }

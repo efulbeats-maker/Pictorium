@@ -28,6 +28,8 @@ export interface StremioPosterParamsInput {
   readonly blurFade?: number
   readonly blurDarkness?: number
   readonly blurEnabled?: boolean
+  /** Intensità tinta di scena 0-100 (default 20). Emessa sempre esplicita. */
+  readonly tintStrength?: number
   readonly networkLogo?: boolean
   /** Scala % del badge superiore (default 100). */
   readonly topBadgeScale?: number
@@ -51,6 +53,8 @@ export interface StremioPosterParamsInput {
   readonly networkLogoOffsetY?: number
   /** Effetto pre-digitale (darken + Coming Soon, solo film). Default OFF. */
   readonly preRelease?: boolean
+  /** Nasconde il logo film dal composite (banner Nuvio: Nuvio lo sovrappone già). Default OFF. */
+  readonly hideLogo?: boolean
   readonly ribbonSide?: "left" | "right"
   /** Formato canvas: emesso come `shape=landscape` solo quando landscape
    *  (il portrait è il default e resta omesso per non invalidare la cache). */
@@ -77,9 +81,10 @@ const DEFAULT_STREMIO_POSTER_PARAMS = {
   badgeStyle: "shadow",
   rankingBadgeStyle: "default",
   gradientHeight: 30,
-  blurIntensity: 5,
-  blurFade: 60,
-  blurDarkness: 40,
+  blurIntensity: 20,
+  blurFade: 50,
+  blurDarkness: 30,
+  tintStrength: 20,
   blurEnabled: true,
   networkLogo: true,
   topBadgeScale: 100,
@@ -121,6 +126,7 @@ export function buildStremioPosterSearchParams(input: StremioPosterParamsInput):
   if (input.title) params.set("title", input.title)
   if (!networkLogo) params.set("netLogo", "0")
   if (input.preRelease) params.set("pre", "1")
+  if (input.hideLogo) params.set("hideLogo", "1")
   if (input.ribbonSide === "right") params.set("side", "right")
   else if (input.ribbonSide === "left") params.set("side", "left")
   if (input.posterShape === "landscape") {
@@ -131,6 +137,7 @@ export function buildStremioPosterSearchParams(input: StremioPosterParamsInput):
   if (!blurEnabled) params.set("be", "0")
   params.set("gradHeight", String(input.gradientHeight ?? DEFAULT_STREMIO_POSTER_PARAMS.gradientHeight))
   params.set("blur", String(input.blurIntensity ?? DEFAULT_STREMIO_POSTER_PARAMS.blurIntensity))
+  params.set("tint", String(input.tintStrength ?? DEFAULT_STREMIO_POSTER_PARAMS.tintStrength))
   params.set("bf", String(input.blurFade ?? DEFAULT_STREMIO_POSTER_PARAMS.blurFade))
   params.set("bd", String(input.blurDarkness ?? DEFAULT_STREMIO_POSTER_PARAMS.blurDarkness))
   params.set("bs", input.badgeStyle || DEFAULT_STREMIO_POSTER_PARAMS.badgeStyle)

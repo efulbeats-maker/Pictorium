@@ -254,7 +254,9 @@ async function pictoriumPosterAndShape(
     animerank: animeRankParam ?? undefined,
   } as const
   const poster = buildStremioPosterUrl(base).toString()
-  const banner = buildStremioPosterUrl({ ...base, forceShape: "landscape" }).toString()
+  // Banner Nuvio: canvas landscape + niente logo baked-in (Nuvio lo
+  // sovrappone già da catalogo) + badge genere in basso a destra.
+  const banner = buildStremioPosterUrl({ ...base, forceShape: "landscape", hideLogo: true }).toString()
   const posterShape = isPosterShape(mapping?.posterShape)
     ? mapping.posterShape
     : (defaults.posterShape === "landscape" ? "landscape" : "poster")

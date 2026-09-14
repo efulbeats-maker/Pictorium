@@ -97,7 +97,7 @@ pinned: false
 ### 🖼️ Locandine, Loghi & Grafica
 * **Selezione Poster Clean**: Scegli in un click la locandina senza testo tra i candidati ufficiali TMDB (`iso_639_1 === null`).
 * **Algoritmo Best-Fit Intelligente**: Analizza luminosità e zone vuote per scalare e posizionare il logo evitando di coprire i volti.
-* **Sfocatura Sfondo (Sharp C++)**: Generazione di sfondi blur cinematografici ultra-rapidi (10–20ms) a basso consumo di RAM.
+* **Sfocatura Progressiva (Sharp C++)**: blur a intensità crescente verso il fondo con tinta di scena same-hue, scurimento quadratico e anti-seam, in pochi ms e a basso consumo di RAM. Intensità tinta regolabile per-titolo e globale (default 20%).
 * **Rotazione Automatica 24h**: Alterna automaticamente ogni giorno più poster salvati per lo stesso titolo.
 * **Loghi Network Ufficiali**: Riconoscimento ed embedding automatico per Netflix, Prime Video, Disney+, Apple TV+, HBO Max, Paramount+, Sky/NOW, Crunchyroll, Rai, Mediaset e oltre 30 studi (Marvel, Pixar, Ghibli, Warner Bros, A24).
 
@@ -109,11 +109,12 @@ I titoli possono avere un secondo formato orizzontale in stile Nuvio, generato d
 * **Best-Fit Cinematic Left**: analisi compatibilità logo calibrata sul canvas 768×432 con logo ancorato a sinistra, ordinamento TMDB/Best Fit e auto-selezione del miglior sfondo.
 * **Rotazione 24h sfondi**: lista candidati, esclusioni permanenti con ripristino e toggle per-titolo, come i poster verticali (stato indipendente).
 * **Badge genere/voto solo default**: in orizzontale vale solo lo stile *shadow* (gli altri restano disponibili in verticale).
+* **Layout senza logo stampato**: in orizzontale niente logo film baked-in e badge genere in basso a destra; sfumatura di default 70.
 * **Libreria a sezioni separate**: "I Miei Poster" mostra verticali e orizzontali in due sezioni con filtro formato e cambio formato rapido dalla card.
 
 ### 🏷️ Badge, Rating & Riconoscimenti
 * **✨ Qualità Streaming (4K / FHD / HD / SD)**: Rilevata in tempo reale dai flussi di Stremio con fallback automatico su JustWatch.
-* **6 Stili Badge Genere & Voto**: *Shadow, Pill, Bar, Colored, Bordo, Vetro* con palette adattiva alla locandina.
+* **7 Stili Badge Genere & Voto**: *Shadow, Pill, Bar, Colored, Bordo, Vetro, Minimal* (`Genere | Voto | Anno`) con palette adattiva alla locandina.
 * **Nastro Verticale Netflix Top 10**: Il caratteristico nastro rosso laterale con posizione live (supporto dedicato anche per Anime).
 * **Premi Cinematografici**: Riconoscimento automatico Oscar, Cannes, BAFTA, Emmy e badge *"Absolute Cinema"* per i titoli della IMDb Top 250.
 * **Classifiche Sempre Sincronizzate**: Il badge Top 10/20 segue la classifica live; se un titolo esce dalla chart, il badge si aggiorna da solo.
@@ -320,6 +321,7 @@ npm install --ignore-scripts && npm run build && npm start
 | `PICTORIUM_RANKING_BADGE_STYLE` | `default`, `bar`, `colored`, `pill`, `netflix` | Stile del badge per le classifiche. |
 | `PICTORIUM_RIBBON_SIDE` | `left` / `right` | Lato del nastro verticale Netflix Top 10. |
 | `PICTORIUM_BLUR_ENABLED` | `1` / `0` | Attiva o disattiva lo sfondo sfocato. |
+| `PICTORIUM_TINT_STRENGTH` | `0` – `100` | Intensità tinta di scena dello sfondo (default `20`). |
 | `PICTORIUM_BADGE_QUALITY` | `1` / `0` | Mostra/nasconde il badge qualità streaming (4K/FHD). |
 | `PICTORIUM_NETWORK_LOGO` | `1` / `0` | Mostra/nasconde il logo del network (Netflix, Prime, ecc.). |
 | `PICTORIUM_PRE_RELEASE` | `1` / `0` | Velo scuro + nastro "Coming Soon" sui film non ancora disponibili in digitale (default OFF). |

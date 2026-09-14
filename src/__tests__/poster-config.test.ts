@@ -56,9 +56,10 @@ describe("resolvePosterRenderConfig", () => {
     expect(r.rankingBadgeStyle).toBe("default")
     expect(r.blurEnabled).toBe(true)
     expect(r.blurHeight).toBe(30)
-    expect(r.blurIntensity).toBe(5)
-    expect(r.blurFade).toBe(60)
-    expect(r.blurDarkness).toBe(40)
+    expect(r.blurIntensity).toBe(20)
+    expect(r.blurFade).toBe(50)
+    expect(r.blurDarkness).toBe(30)
+    expect(r.tintStrength).toBe(20)
     expect(r.badgesEnabled).toBe(true)
     expect(r.rankingEnabled).toBe(true)
     expect(r.ribbonSide).toBe("left")
@@ -213,6 +214,22 @@ describe("resolvePosterRenderConfig", () => {
     expect(resolvePosterRenderConfig(baseInput({ configOverride: config({ networkLogo: false }) })).networkLogo).toBe(false)
     expect(resolvePosterRenderConfig(baseInput({ sd: { networkLogo: false } })).networkLogo).toBe(false)
     expect(resolvePosterRenderConfig(baseInput()).networkLogo).toBe(true)
+  })
+
+  it("hideLogo: only explicit query hides the film logo (default false, no mapping/config chain)", () => {
+    expect(resolvePosterRenderConfig(baseInput()).hideLogo).toBe(false)
+    expect(resolvePosterRenderConfig(baseInput({ searchParams: new URLSearchParams({ hideLogo: "1" }) })).hideLogo).toBe(true)
+    expect(resolvePosterRenderConfig(baseInput({ searchParams: new URLSearchParams({ hideLogo: "0" }) })).hideLogo).toBe(false)
+  })
+
+  it("tintStrength: query wins, then mapping, then config token, then sd, then 20 (clamped 0..100)", () => {
+    expect(resolvePosterRenderConfig(baseInput()).tintStrength).toBe(20)
+    expect(resolvePosterRenderConfig(baseInput({ searchParams: new URLSearchParams({ tint: "60" }) })).tintStrength).toBe(60)
+    expect(resolvePosterRenderConfig(baseInput({ searchParams: new URLSearchParams({ tint: "999" }) })).tintStrength).toBe(100)
+    expect(resolvePosterRenderConfig(baseInput({ searchParams: new URLSearchParams({ tint: "abc" }) })).tintStrength).toBe(20)
+    expect(resolvePosterRenderConfig(baseInput({ mapping: mapping({ tintStrength: 40 }) })).tintStrength).toBe(40)
+    expect(resolvePosterRenderConfig(baseInput({ configOverride: config({ tintStrength: 70 }) })).tintStrength).toBe(70)
+    expect(resolvePosterRenderConfig(baseInput({ sd: { tintStrength: 35 } })).tintStrength).toBe(35)
   })
 
   it("queryExtra picks up extra param or config customBadge", () => {
@@ -598,6 +615,21 @@ describe("resolvePosterRenderConfig", () => {
       searchParams: new URLSearchParams({ shape: "landscape" }),
       mapping: mapping({ gradientHeight: 45 }),
     })).blurHeight).toBe(45)
+  })
+
+  it("blurFade defaults to 70 in landscape, 50 in portrait", () => {
+    expect(resolvePosterRenderConfig(baseInput()).blurFade).toBe(50)
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+    })).blurFade).toBe(70)
+    // Query/mapping espliciti vincono sul default di formato.
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape", bf: "40" }),
+    })).blurFade).toBe(40)
+    expect(resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ shape: "landscape" }),
+      mapping: mapping({ blurFade: 55 }),
+    })).blurFade).toBe(55)
   })
 
   it("resolvePosterRenderConfig exposes posterShape from the same chain", () => {

@@ -179,8 +179,16 @@ function startCleanup() {
       cleanupActive = false
       return
     }
+    const now = Date.now()
     for (const [key, entry] of store) {
-      if (isExpired(entry)) deleteEntry(key)
+      if (isExpired(entry)) {
+        const isSwr = entry.tags.includes("poster") || entry.tags.includes("catalog")
+        const graceMs = isSwr ? 24 * 60 * 60 * 1000 : 0
+        const ttl = entry.ttl || ttlForTags(entry.tags)
+        if (now - entry.timestamp > ttl + graceMs) {
+          deleteEntry(key)
+        }
+      }
     }
   }, 60_000)
 }
@@ -290,6 +298,22 @@ export function cacheInvalidate(tag: string): void {
   }
 }
 
+/**
+ * Pone timestamp = 0 su tutte le entry che matchano tagOrKey (tag, key esatta o prefisso/substring),
+ * rendendole immediatamente stale per il pattern SWR senza cancellare il payload dalla memoria.
+ * Ritorna il numero di entry scadute.
+ */
+export function cacheExpire(tagOrKey: string): number {
+  let count = 0
+  for (const [key, entry] of store) {
+    if (entry.tags.includes(tagOrKey) || key === tagOrKey || key.startsWith(tagOrKey) || key.includes(tagOrKey)) {
+      entry.timestamp = 0
+      count++
+    }
+  }
+  return count
+}
+
 export function cacheInvalidatePosterData(): void {
   cacheInvalidate("poster")
   cacheInvalidate("catalog")
@@ -310,16 +334,22 @@ export function cacheStatus(): CacheStatus {
   const tagCounts = new Map<string, number>()
   let totalEntries = 0
   let untaggedEntries = 0
+  let activeBytes = 0
 
-  // Cleanup pass: remove expired entries and adjust byte count
-  const expiredKeys: string[] = []
   for (const [key, entry] of store) {
-    if (isExpired(entry)) expiredKeys.push(key)
-  }
-  for (const key of expiredKeys) deleteEntry(key)
+    if (isExpired(entry)) {
+      // Entry senza supporto SWR: evizione immediata su status pass.
+      // Entry SWR (poster/catalog): non cancellare per consentire la revalidazione in background,
+      // ma escludere dai conteggi di entry attive.
+      const isSwr = entry.tags.includes("poster") || entry.tags.includes("catalog")
+      if (!isSwr) {
+        deleteEntry(key)
+      }
+      continue
+    }
 
-  for (const entry of store.values()) {
     totalEntries += 1
+    activeBytes += estimateBytes(entry.data)
 
     if (entry.tags.length === 0) {
       untaggedEntries += 1
@@ -339,7 +369,7 @@ export function cacheStatus(): CacheStatus {
     totalEntries,
     taggedEntries,
     untaggedEntries,
-    totalBytes,
+    totalBytes: activeBytes,
     maxBytes: MAX_BYTES,
     maxEntries: MAX_ENTRIES,
   }

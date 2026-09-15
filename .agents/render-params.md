@@ -15,42 +15,45 @@ When you modify a visual render parameter in one file, update its server counter
 
 | Parametro | Server (`svg-badge.ts:renderGenreBadge`) |
 |---|---|
-| Font size | `finalFontSize = round(24 * 1.2 * pw / 380)` (base 120% nativa) |
+| Font size | `finalFontSize = round(22 * pw / 380)` (base cinematografica discreta, era `24 * 1.2`; 20 risultava troppo piccola) |
 | Gap genere→bullet | `round(fs / 3)` |
 | Gap stella→voto | `round(fs / 6)` |
-| Padding orizzontale | `genreBadgeSafePad(finalFontSize) = round(finalFontSize * 1.15)` dentro SVG; `pad = round(finalFontSize * 0.35)` (solo pill) |
+| Padding orizzontale | `genreBadgeSafePad(finalFontSize) = round(finalFontSize * 1.15)` dentro SVG; padding scatola `padX = round(fs * 0.85)` (pill, vetro, bordo) |
 | Larghezza bullet | `bulletW = round(finalFontSize * 0.35)` |
 | Larghezza stella | `starW = round(finalFontSize * 0.92)` |
-| Altezza badge | `svgH = max(round(finalFontSize * 1.6), 24)` |
+| Altezza badge | `svgH = badgeBoxHeight(fs) = fs + round(fs * 0.40) * 2` (~`1.8 * fs` unificato per tutti i container) |
 | Colori testo | `#e5e7eb` |
 | Text shadow | `"0 4px 6px rgba(0,0,0,0.5)"` |
-| Overflow protection | `totalW + safePad*2 > min(pw - 20, round(pw * 0.84))`, usa `genreBadgeDims()`. Per pill usa `min(width - 20, round(width * 0.78))` su `textContentW + pillPad*3 + safePad*2` |
+| Overflow protection | `totalW + safePad*2 > min(pw - 20, round(pw * 0.84))`, usa `genreBadgeDims()`. Per pill usa `genrePillMaxW(pw)` su `textContentW + padX*2 + safePad*2` (`padX = round(fs * 0.85)`, nessuna ombra esterna; loop max 3 iterazioni con margine 4px) |
 | Misura testo | `estimateTextWidth()` per-glyph in `badge-svg-shared.ts`; SVG vincolato con `textLength` + `lengthAdjust="spacingAndGlyphs"` |
 | Allineamento verticale | Un solo `<text>` con `text-anchor="middle" x="adjustedX"` (compensa dx) e `<tspan dx=...>`; `dominant-baseline="central"` e stella con `Noto Sans Symbols 2` |
-| Stili badge (`badgeStyle`) | `shadow` — textShadow; `minimal` — separatore pipe `|` + textShadow discreto (1px); `pill` — bg fissa `rgba(255,255,255,0.80)` + testo `rgba(0,0,0,0.80)` + stroke 1px `rgba(255,255,255,0.18)`; `bar` — bg fissa `rgba(255,255,255,0.80)` full-width + testo `rgba(0,0,0,0.80)` + bordo superiore 1px `rgba(0,0,0,0.10)`; `colored` — bg tinta di scena same-hue (bottom per genere, top per ranking; `ac=` vince) + testo adattivo; `bordo` — rect arrotondato con bordo 2px + bg trasparente; `vetro` — vetro liquido iOS (gradiente multi-stop + bordo 1.5px) |
-| Sfondo pill/bar | Colori FISSI (non dipendono da `topLight`): pill = `rgba(255,255,255,0.80)`, bar (`buildGenreBarSvg`) = path `rgba(255,255,255,0.80)` |
-| Testo pill/bar | Colori FISSI: pill = `rgba(0,0,0,0.80)`, bar = `rgba(0,0,0,0.80)` (argomento textColor esplicito in `svg-badge.ts:191`) |
+| Stili badge (`badgeStyle`) | `shadow` — textShadow; `minimal` — separatore pipe `|` + textShadow discreto (1px); `pill` — gradiente satinato `satinPillStops(topLight)` + stroke 1px `rgba(255,255,255,0.18)` + testo adattivo (`topLight ? white : black`), nessuna ombra esterna; `bar` — bg fissa `rgba(255,255,255,0.80)` full-width + testo `rgba(0,0,0,0.80)` + bordo superiore 1px `rgba(0,0,0,0.10)`; `colored` — bg tinta di scena same-hue (bottom per genere, top per ranking; `ac=` vince) + testo adattivo (pill piatta, niente satinatura); `bordo` — rect arrotondato con bordo 2px + stroke calibrato + bg fumé (`topLight ? 0.06 : 0.08`); `vetro` — vetro liquido iOS (gradiente multi-stop + bordo 1.5px, stesso box model e dimensioni identiche al bordo: padding e rect coincidenti) |
+| Sfondo pill/bar | bar (`buildGenreBarSvg`) = path fisso `rgba(255,255,255,0.80)`; pill genere/ranking/extra = gradiente satinato `satinPillStops(topLight)` (stessa polarità del ranking default) |
+| Posizione Y unificata | Box model normalizzato: zero salti di baseline tra stili (`genreStyleShiftY` rimosso); altezza uniforme `badgeBoxHeight(fs)`; la riga multi-rating segue sopra il badge |
+| Testo pill/bar | bar = `rgba(0,0,0,0.80)` fisso; pill = adattivo `topLight ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.80)"` (pill colored resta tinta piatta + `textColorForBg`) |
+| Stella voto | gradiente oro verticale `#FCD34D → #F59E0B` (`linearGradient#starg`) sul `tspan` stella; bullet `•` a opacità 0.45 (solo ingombro visivo, metriche invariate) |
 | Bordo bar | `line` 1px in alto `rgba(0,0,0,0.10)` (fisso); `topLight` non usato in `buildGenreBarSvg` |
+| Box Model Unificato | Altezza scatola `badgeBoxHeight(fs) = fs + round(fs * 0.40) * 2` (`1.8 * fs`), padding X `round(fs * 0.75)`, ombra uniforme `badgeShadowBox(h)` (`blur = max(round(h * 0.20), 4), off = max(round(h * 0.10), 2)`) condiviso da tutti i badge centrati |
 
 ## Badge Ranking/Extra
 
 | Parametro | Server (`svg-badge.ts:renderRankingBadge/renderExtraBadge`) |
 |---|---|
-| Font size base | `23 * pw / 380` (rank), `×0.9` per extra ("Vincitore Oscar" a 100% troppo grande) |
-| Padding X | `px = round(finalFontSize * 1.0)` |
-| Padding Y (bar) | `pt = pb = round(displayFs * 0.35)` |
-| Padding Y (default) | `pt = pb = round(displayFs * 0.5)` |
-| Border radius | `r = round(finalFontSize * 0.7)` |
-| Ombra | `shadowBlur = round(fs * 0.6)`, `shadowOff = round(fs * 0.2)` |
-| Sfondo | `default`/`netflix` — gradiente satinato traslucido a polarità pill (`satinPillStops(topLight)`: pill chiara su top scuro, grafite su top chiaro); `pill`/`bar`/`colored` — flat `topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)"` |
+| Font size base | `24 * pw / 380` (rank), `×0.9` per extra (era 20); nastro Netflix invariato |
+| Padding X | `px = round(finalFontSize * 0.75)` (unificato con genre badges) |
+| Altezza scatola | `boxH = badgeBoxHeight(fs) = fs + round(fs * 0.40) * 2` (unificato con genre badges) |
+| Border radius | `r = round(finalFontSize * 0.7)` per default/bar, `boxH / 2` per pill |
+| Ombra | `badgeShadowBox(boxH)`: `blur = max(round(boxH * 0.20), 4)`, `off = max(round(boxH * 0.10), 2)` |
+| Sfondo | `default`/`netflix` — gradiente satinato traslucido a polarità pill (`satinPillStops(topLight)`: pill chiara su top scuro, grafite su top chiaro); `pill` — satinato come default + stroke 1px (testo adattivo invariato); `bar`/`colored` — flat `topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)"` |
 | Testo | `topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)"` (invariato) |
 | Stabilizzazione testo | `textLength` + `lengthAdjust="spacingAndGlyphs"` sul `<text>` per evitare differenze metriche tra Windows/local e Linux/HF |
 | Overflow protection | Stessa formula con `pw - 20`, fattori `3.55` (ranking, include shadow) e `3.2` (extra); extra compatti cappati al 65% di `pw` (solo label oltre il cap si rimpiccioliscono) |
 | Posizione | Composito a `top: 0, left: round((pw - w) / 2)` (default/bar/pill/colored); nastro Netflix a `left: 0` (Nuvio) o `left: STD_W - w` specchiato (Stremio, `side=right`); logo network segue a destra del nastro (`w + 10`) o a sinistra (`STD_W - w - 10 - logoW`) |
 | Scala badge superiore (`topBadgeScale`) | Resize bitmap dopo il render (nastro incluso; la **barra** scala nativa via font per restare full-width), prima di `fitBadgeToCanvas`; `%` 10..200, default 100; entra nella `rankBadgeKey` |
+| Geometria staccata (`isDetached`) | Solo stili centrati (default/extra; nastro/barra restano ancorati) con `toy !== 0`: tutti e 4 gli angoli raccordati (`rx = r`) invece del tetto dritto; stesso box di render; entra nella `rankBadgeKey` come `detached` (bitmap diverso) |
 | Offset badge superiore (`topBadgeOffsetX/Y`) | Solo stili centrati: `left = center + tox`, `top = 0 + toy` (px, default 0); nastro/barra restano ancorati; la matematica overlap usa `finalRankTop + h` |
 | Posizione badge qualità | Angolo in alto a destra (`left = pw - w - padX`, `top = padY`); con nastro Netflix a destra (Stremio) va a **sinistra** (`left = padX`) per non restargli accanto, impilato sotto il logo network se occupa il top-left (`top = netBottom + gap`) |
-| Sfondo badge qualità | Gradiente satinato traslucido a polarità pill (`satinPillStops(topLight)`); bordo `topLight ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.22)"` 1.5px; testo invariato (`topLight ? "rgba(255,255,255,0.95)" : "rgba(0,0,0,0.88)"`) |
+| Sfondo badge qualità | Gradiente satinato traslucido a polarità pill (`satinPillStops(topLight)`); altezza unificata `badgeBoxHeight(fs)`; bordo `topLight ? "rgba(0,0,0,0.12)" : "rgba(255,255,255,0.22)"` 1.5px; testo invariato (`topLight ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.88)"`); font base `17 * pw / 380` (era `14`) |
 
 ## Pill Network Logo
 
@@ -121,9 +124,9 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 | `bs` | `badgeStyle` | `qBs` — "shadow"/"pill"/"bar"/"colored"/"bordo"/"vetro"/"minimal" (in landscape forzato a "shadow": solo default per ora) |
 | `rs` | `rankingBadgeStyle` | `qRs` — "default"/"bar"/"colored"/"pill"/"netflix" |
 | `tscale`/`tox`/`toy` | `topBadgeScale`/`topBadgeOffsetX`/`topBadgeOffsetY` (badge superiore) | scala `%` 10..200 (default 100, tutti gli stili) + offset px (default 0, solo centrati) |
-| `gscale` | `genreBadgeScale` (badge genere/rating in basso) | scala `%` 10..200 (default 100 su base 120% nativa; la **barra** scala nativa via font per restare full-width) |
+| `gscale` | `genreBadgeScale` (badge genere/rating in basso) | scala `%` 10..200 (default 100 su base 28.6px nativa; la **barra** scala nativa via font per restare full-width) |
 | `gox`/`goy` | `genreBadgeOffsetX`/`genreBadgeOffsetY` | offset px (default 0, solo stili non-bar) |
-| `qscale` | `qualityBadgeScale` (badge qualità streaming) | scala `%` 10..200 (default 100 su base 120% nativa) |
+| `qscale` | `qualityBadgeScale` (badge qualità streaming) | scala `%` 10..200 (default 100 su base 17px nativa) |
 | `qox`/`qoy` | `qualityBadgeOffsetX`/`qualityBadgeOffsetY` | offset px (default 0) |
 | `netscale` | `networkLogoScale` (logo network) | scala `%` 10..200 (default 100) |
 | `nox`/`noy` | `networkLogoOffsetX`/`networkLogoOffsetY` | offset px (default 0) |
@@ -149,6 +152,7 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 | Dimensione logo | `computeLogoOffsetBounds()` usa `computeLogoBox()` | `computeLogoLayout()` usa `computeLogoBox()` |
 | Scala | `logoScale` come percentuale della larghezza poster, max larghezza poster | Stessa logica, senza cap artificiale al 25% altezza |
 | Cap altezza | Solo canvas poster (`posterH`) | Solo canvas poster (`STD_H`) |
+| Margine inferiore | `bottomMarginPct: 12` con badge genere, `10` storico senza (mirror in `context.tsx` per i bound slider) | `bottomMarginPct: hasGenreBadge ? 12 : undefined` (default 10) — solleva il logo sopra il badge basso |
 
 ## Files coinvolti
 

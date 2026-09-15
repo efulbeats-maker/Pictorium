@@ -532,6 +532,9 @@ export function usePictorium(): PictoriumCtx {
       logoScale,
       hasBadges,
       align: isLandscapeShape ? logoAlign : "center",
+      // Stessi vincoli del server: margine 12% col badge genere (0.10 storico
+      // senza), altrimenti i bound degli slider mentono sul render finale.
+      ...(hasBadges ? { bottomMarginPct: 12 } : {}),
       ...(isLandscapeShape ? { maxWidthPct: 40, maxHeightPct: 24, bottomMarginPct: 25, topOffset: 55 } : {}),
     })
   }, [navigation.previewPoster, navigation.selectedLogo, logoScale, hasBadges, posterShape, logoAlign])

@@ -1,6 +1,6 @@
 import sharp from "sharp"
 import { describe, expect, it } from "vitest"
-import { buildGenrePillSvg, buildGenreTextSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops } from "@/lib/badge-svg-shared"
+import { buildGenrePillSvg, buildGenreTextSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops, buildGenreGlassSvg, buildGenreBorderedSvg, buildRankingGlassSvg, buildRankingBorderedSvg } from "@/lib/badge-svg-shared"
 import { buildGenreBadgeSVG, buildRankingBadgeSVG, buildExtraBadgeSVG, buildNetflixRankBadgeSVG, renderComingSoonRibbon, comingSoonRibbonLayout } from "@/lib/svg-badge"
 
 async function alphaBounds(png: Buffer) {
@@ -26,7 +26,9 @@ describe("buildGenreBadgeSVG", () => {
     const { svg } = buildGenreTextSvg("Sci-Fi & Fantasy", "8.0", "2022", 63, "#e5e7eb", "shadow")
 
     expect(svg).toContain("<tspan>Sci-Fi &amp; Fantasy</tspan>")
-    expect(svg).toContain('<tspan dx="21" fill-opacity="0.6">•</tspan>')
+    // Bullet calibrato 0.45 (restyle cinematografico) + stella dorata con gradiente.
+    expect(svg).toContain('<tspan dx="21" fill-opacity="0.45">•</tspan>')
+    expect(svg).toContain('fill="url(#starg)"')
     expect(svg).toContain('text-anchor="middle"')
     expect(svg).toContain('lengthAdjust="spacingAndGlyphs"')
     expect(svg).not.toContain("Sci-Fi &amp; Fantasy</text><text")
@@ -320,15 +322,15 @@ describe("buildRankingBadgeSVG", () => {
 
 describe("top badge uniformity (rank vs extra)", () => {
   it("renders extra badges at 90% of the rank size", async () => {
-    // Rank a fs 23, extra al 90% (~fs 21): un'etichetta lunga a 100%
-    // risultava troppo grande. h extra ≈ 60, h rank ≈ 66.
+    // Rank a fs 20, extra al 90% (~fs 18): un'etichetta lunga a 100%
+    // risultava troppo grande. h extra ≈ 41, h rank ≈ 47 a pw 380.
     const rank = await buildRankingBadgeSVG(3, 380, "Oggi", false, "default", "#555555")
     const extra = await buildExtraBadgeSVG("Oscar 2024", 380, false, "default", "#555555")
     expect(rank).not.toBeNull()
     expect(extra).not.toBeNull()
     expect(extra!.h).toBeLessThan(rank!.h)
     expect(extra!.h / rank!.h).toBeCloseTo(0.9, 1)
-    expect(extra!.h).toBeGreaterThan(50)
+    expect(extra!.h).toBeGreaterThan(35)
   })
 })
 
@@ -492,5 +494,25 @@ describe("renderComingSoonRibbon", () => {
       expect(whiteCount, `White text pixels for ${label}`).toBeGreaterThan(20)
     }
   }, 30000)
+})
+
+describe("vetro shares bordo box model (same size and position)", () => {
+  it("genre glass and bordered produce identical bitmap dimensions", () => {
+    for (const topLight of [false, true]) {
+      const glass = buildGenreGlassSvg("Dramma", "8.2", "2024", 34, "#fff", topLight)
+      const bordo = buildGenreBorderedSvg("Dramma", "8.2", "2024", 34, "#fff", topLight)
+      expect(glass.w).toBe(bordo.w)
+      expect(glass.h).toBe(bordo.h)
+    }
+  })
+
+  it("ranking glass and bordered produce identical bitmap dimensions", () => {
+    for (const topLight of [false, true]) {
+      const glass = buildRankingGlassSvg("#1 Oggi", 30, "#fff", "", topLight)
+      const bordo = buildRankingBorderedSvg("#1 Oggi", 30, "#fff", topLight)
+      expect(glass.w).toBe(bordo.w)
+      expect(glass.h).toBe(bordo.h)
+    }
+  })
 })
 

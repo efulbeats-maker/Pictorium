@@ -1,7 +1,7 @@
 import fs from "fs"
 import { textColorForBg } from "./accent-color"
 import { FONT_FILES, FONT_INTER_REGULAR, FONT_INTER_BOLD, FONT_INTER_BLACK, FONT_SYMBOLS } from "./fonts"
-import { estimateTextWidth, fontFamilyFor, genreBadgeSafePad, genreBadgeSvgDims, genrePillMaxW, buildGenreBarSvg, buildGenrePillSvg, buildGenreTextSvg, buildGenreBorderedSvg, buildGenreGlassSvg, buildRankingBarSvg, buildRankingDefaultSvg, buildRankingPillSvg, buildExtraBarSvg, buildExtraDefaultSvg, buildExtraPillSvg, buildExtraGlassSvg, buildQualityBadgeSvg, escSvg, satinPillStops } from "./badge-svg-shared"
+import { estimateTextWidth, fontFamilyFor, genreBadgeSafePad, genreBadgeSvgDims, genrePillMaxW, BADGE_BOX_PAD_X_FACTOR, buildGenreBarSvg, buildGenrePillSvg, buildGenreTextSvg, buildGenreBorderedSvg, buildGenreGlassSvg, buildRankingBarSvg, buildRankingDefaultSvg, buildRankingPillSvg, buildExtraBarSvg, buildExtraDefaultSvg, buildExtraPillSvg, buildExtraGlassSvg, buildQualityBadgeSvg, escSvg, satinPillStops } from "./badge-svg-shared"
 import type { GenreParts } from "./badge-svg-shared"
 import type { BadgeStyle, RankingBadgeStyle, ExtraBadgeStyle } from "./badge-styles"
 
@@ -117,15 +117,17 @@ export async function buildExtraBadgeSVG(
   accentColor?: string,
   /** Scala % applicata al font solo per lo stile barra (gli altri scalano via bitmap nel service). */
   scale = 100,
+  /** Placca fluttuante con 4 angoli raccordati (badge staccato dal top via toy). */
+  detached = false,
 ): Promise<{ png: Buffer; w: number; h: number } | null> {
   const s = badgeStyle || "default"
   // Cap estetico per gli stili compatti: oltre il 65% di pw il testo si
   // rimpicciolisce (le label corte restano invariate). La barra resta
   // full-width: lì vale solo il bound hard anti-overflow (pw - 20).
   const maxBadgeW = s === "bar" ? pw - 20 : Math.round(pw * 0.65)
-  // Extra al 90% del badge ranking: a pari fs (es. "Candidato Golden Globe")
-  // il testo risultava troppo grande rispetto ai rank.
-  let finalFs = 23 * 0.9 * pw / 380
+  // Extra al 90% del badge ranking (base 24): a pari fs le label lunghe
+  // ("Candidato Golden Globe") restano compatte rispetto ai rank.
+  let finalFs = 24 * 0.9 * pw / 380
   // Barra full-width: la scala assottiglia nativamente (font+padding),
   // senza staccare la barra dal bordo come farebbe il resize bitmap.
   if (s === "bar") finalFs = (finalFs * scale) / 100
@@ -149,11 +151,11 @@ export async function buildExtraBadgeSVG(
   if (s === "bar") {
     result = buildExtraBarSvg(label, pw, fs, fg, bg)
   } else if (s === "pill") {
-    result = buildExtraPillSvg(label, fs, fg, bg)
+    result = buildExtraPillSvg(label, fs, fg, bg, !!topLight)
   } else if (isGlass) {
     result = buildExtraGlassSvg(label, fs, fg, bg, !!topLight)
   } else {
-    result = buildExtraDefaultSvg(label, fs, fg, bg)
+    result = buildExtraDefaultSvg(label, fs, fg, bg, detached)
   }
   const png = await renderSVG(wrapSvg(result.svg), result.w)
   return { png, w: result.w, h: result.h }
@@ -171,9 +173,8 @@ export async function buildGenreBadgeSVG(
   const voteStr = voteAverage ? voteAverage.toFixed(1) : ""
   const yearStr = year || ""
 
-  // Base al 120%: il badge genere/rating di default rende come l'ex-120%
-  // ma nativo (niente upscale bitmap) — lo slider `gscale` parte da 100.
-  let finalFs = 24 * 1.2 * pw / 380
+  // Base 28.6px (+30% scala nativa): resa bilanciata e leggibile, lo slider `gscale` parte da 100.
+  let finalFs = 28.6 * pw / 380
   // Barra full-width: vedi nota in buildExtraBadgeSVG.
   if (s === "bar") finalFs = (finalFs * scale) / 100
   const aestheticMaxW = Math.round(pw * 0.86) // 86% per margine estetico
@@ -191,12 +192,19 @@ export async function buildGenreBadgeSVG(
 
   const isPillStyle = s === "pill" || s === "colored"
   if (isPillStyle) {
-    const _pillPad = Math.round(finalFs * 0.35)
+    // Cap anti-sprawl sulla larghezza totale della pill (box model unificato con padX = 0.75*fs, zero safePad):
+    // il bound resta sul totale textContentW + padX*2. Itera al massimo 3 volte (converge subito).
     const maxPillW = genrePillMaxW(pw)
-    if (dims.textContentW + _pillPad * 3 + safePad * 2 > maxPillW) {
-      finalFs = Math.max(maxPillW / (dims.textContentW + _pillPad * 3 + safePad * 2) * finalFs, 10)
-      dims = genreBadgeSvgDims(finalFs, genreName, voteStr, yearStr, parts)
+    for (let i = 0; i < 3; i++) {
+      const _padX = Math.round(finalFs * BADGE_BOX_PAD_X_FACTOR)
+      const _dims = genreBadgeSvgDims(finalFs, genreName, voteStr, yearStr, parts)
+      const total = _dims.textContentW + _padX * 2
+      // Margine 4px: il builder arrotonda per eccesso rispetto alla stima.
+      if (total + 4 <= maxPillW) break
+      finalFs = Math.max((maxPillW - 4) / total * finalFs, 10)
     }
+    dims = genreBadgeSvgDims(finalFs, genreName, voteStr, yearStr, parts)
+    safePad = genreBadgeSafePad(finalFs)
   }
   let fs = Math.round(finalFs)
   const isPill = s === "pill" || s === "colored"
@@ -204,7 +212,10 @@ export async function buildGenreBadgeSVG(
 
   const textColor = s === "colored"
     ? textColorForBg(accentColor || "")
-    : (isPill ? "rgba(0,0,0,0.80)" : "#e5e7eb")
+    : (isPill && s === "pill" && topLight)
+      // Pill satinata: su poster chiaro la pill diventa grafite → testo chiaro.
+      ? "rgba(255,255,255,0.85)"
+      : (isPill ? "rgba(0,0,0,0.80)" : "#e5e7eb")
   const bgColor = s === "colored"
     ? (accentColor && accentColor !== "#555555" ? accentColor : "rgba(255,255,255,0.80)")
     : (isPill ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)")
@@ -217,7 +228,9 @@ export async function buildGenreBadgeSVG(
   } else if (isBar) {
     result = buildGenreBarSvg(genreName, voteStr, yearStr, pw, fs, "rgba(0,0,0,0.80)", !!topLight, 0, parts)
   } else if (isPill) {
-    result = buildGenrePillSvg(genreName, voteStr, yearStr, fs, bgColor, textColor, 0, parts)
+    // colored: tinta piatta (niente satinatura); pill: satinatura polare.
+    const useSatin = s !== "colored"
+    result = buildGenrePillSvg(genreName, voteStr, yearStr, fs, bgColor, textColor, 0, parts, !!topLight, useSatin)
   } else {
     result = buildGenreTextSvg(genreName, voteStr, yearStr, fs, textColor, s, 0, parts)
     // Per shadow, il renderW include shadowPad*2 + safePad*2 aggiuntivi
@@ -350,12 +363,15 @@ export async function buildRankingBadgeSVG(
   isAnime?: boolean,
   /** Scala % applicata al font solo per lo stile barra (gli altri scalano via bitmap nel service). */
   scale = 100,
+  /** Placca fluttuante con 4 angoli raccordati (badge staccato dal top via toy). */
+  detached = false,
 ): Promise<{ png: Buffer; w: number; h: number } | null> {
   const s = badgeStyle || "default"
   const periodText = label || "Oggi"
   const fullText = `#${rank} ${periodText}`
   const maxBadgeW = pw - 20
-  let finalFs = 23 * pw / 380
+  // Base 24px (+20% scala nativa): placca visibile in alto, lo slider `topBadgeScale` parte da 100.
+  let finalFs = 24 * pw / 380
   // Barra full-width: vedi nota in buildExtraBadgeSVG.
   if (s === "bar") finalFs = (finalFs * scale) / 100
   const projectedW = estimateTextWidth(fullText, finalFs) + Math.round(finalFs * 2) + Math.round(finalFs * 0.6) * 2
@@ -380,10 +396,10 @@ export async function buildRankingBadgeSVG(
   } else if (s === "bar") {
     result = buildRankingBarSvg(fullText, pw, fs, fg, bg)
   } else if (s === "pill") {
-    result = buildRankingPillSvg(fullText, fs, fg, bg)
+    result = buildRankingPillSvg(fullText, fs, fg, bg, !!topLight)
   } else {
     // colored: passa la tinta accent come flatBg (resta piatta); default: gradiente.
-    result = buildRankingDefaultSvg(fullText, fs, fg, bg, !!topLight, isColored ? bg : undefined)
+    result = buildRankingDefaultSvg(fullText, fs, fg, bg, !!topLight, isColored ? bg : undefined, detached)
   }
   const png = await renderSVG(wrapSvg(result.svg), result.w)
   return { png, w: result.w, h: result.h }
@@ -392,9 +408,9 @@ export async function buildRankingBadgeSVG(
 export async function renderRankingBadge(
   rank: number, pw: number, label?: string,
   topLight?: boolean, badgeStyle?: RankingBadgeStyle, accentColor?: string, side?: "left" | "right", isAnime?: boolean,
-  scale = 100,
+  scale = 100, detached = false,
 ): Promise<{ png: Buffer; w: number; h: number }> {
-  const r = await buildRankingBadgeSVG(rank, pw, label, topLight, badgeStyle, accentColor, side, isAnime, scale)
+  const r = await buildRankingBadgeSVG(rank, pw, label, topLight, badgeStyle, accentColor, side, isAnime, scale, detached)
   if (r) return r
   throw new Error(`SVG ranking badge failed: rank=${rank}`)
 }
@@ -402,9 +418,9 @@ export async function renderRankingBadge(
 export async function renderExtraBadge(
   label: string, pw: number, topLight?: boolean,
   badgeStyle?: ExtraBadgeStyle, accentColor?: string,
-  scale = 100,
+  scale = 100, detached = false,
 ): Promise<{ png: Buffer; w: number; h: number }> {
-  const r = await buildExtraBadgeSVG(label, pw, topLight, badgeStyle, accentColor, scale)
+  const r = await buildExtraBadgeSVG(label, pw, topLight, badgeStyle, accentColor, scale, detached)
   if (r) return r
   throw new Error(`SVG extra badge failed: ${label}`)
 }
@@ -482,12 +498,13 @@ export async function renderQualityBadge(
   pw: number,
   topLight?: boolean,
 ): Promise<{ png: Buffer; w: number; h: number }> {
-  // Base al 120% nativa (come il badge genere): lo slider `qscale` parte da 100.
-  const fs = Math.round(Math.max(14 * 1.2 * pw / 380, 10))
+  // Base 17px (calibrato sul 65% di 26): watermark bilanciato e sobrio in alto a destra, lo slider `qscale` parte da 100.
+  const fs = Math.round(Math.max(17 * pw / 380, 10))
   const bg = topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)"
   const fg = topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)"
   const result = buildQualityBadgeSvg(quality, fs, fg, bg, !!topLight)
   const png = await renderSVG(wrapSvg(result.svg), result.w)
   return { png, w: result.w, h: result.h }
 }
+
 

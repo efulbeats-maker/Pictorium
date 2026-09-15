@@ -7,15 +7,15 @@ function BadgePreview({ style, accentColor }: { style: string; accentColor?: str
     case "shadow":
       return <span className={`${base} bg-transparent text-white`} style={{ textShadow: "0 1px 3px rgba(0,0,0,0.7), 0 0 6px rgba(0,0,0,0.4)" }}>Aa</span>
     case "pill":
-      return <span className={`${base} text-white`} style={{ background: "rgba(255,255,255,0.18)", padding: "0 3px" }}>Aa</span>
+      return <span className={`${base} text-black`} style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.66) 62%, rgba(255,255,255,0.50) 100%)", padding: "0 3px", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 3px rgba(0,0,0,0.6), 0 4px 8px rgba(0,0,0,0.35)" }}>Aa</span>
     case "bar":
       return <span className={`${base} text-white w-7`} style={{ background: "rgba(255,255,255,0.12)", borderRadius: 1 }}>Aa</span>
     case "colored":
       return <span className={`${base} text-black font-black`} style={{ background: ac }}>Aa</span>
     case "bordo":
-      return <span className={`${base} text-white`} style={{ border: "1px solid rgba(255,255,255,0.5)", borderRadius: 3, background: "transparent" }}>Aa</span>
+      return <span className={`${base} text-white`} style={{ border: "1.5px solid rgba(255,255,255,0.6)", borderRadius: 3, background: "rgba(255,255,255,0.18)", boxShadow: "0 0 4px rgba(255,255,255,0.35)" }}>Aa</span>
     case "vetro":
-      return <span className={`${base} text-white`} style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.15)" }}>Aa</span>
+      return <span className={`${base} text-white`} style={{ background: "rgba(255,255,255,0.08)", backdropFilter: "blur(4px)", border: "1px solid rgba(255,255,255,0.15)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.4), 0 2px 3px rgba(0,0,0,0.6), 0 4px 8px rgba(0,0,0,0.35)" }}>Aa</span>
     case "minimal":
       return <span className={`${base} bg-transparent text-white font-medium`} style={{ textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>A|a</span>
     case "netflix":

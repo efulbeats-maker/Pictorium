@@ -667,6 +667,9 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
             posterW: CW, posterH: CH, logoW: lw, logoH: lh,
             logoScale: uScale, logoOffsetX: uOx, logoOffsetY: uOy,
             hasBadges: hasGenreBadge,
+            // Margine maggiorato solo col badge genere (12% vs 10% storico):
+            // solleva il logo sopra il badge basso senza spostare i poster clean.
+            bottomMarginPct: hasGenreBadge ? 12 : undefined,
             align,
           })
           const resized = await resizeLogoCached(logoFetch, layout.width, layout.height, logoSrc)
@@ -841,11 +844,18 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
 
   const hasQualityBadge = badgeQuality !== false && !!quality
 
+  // Placca staccata: solo gli stili centrati (nastro e barra restano ancorati)
+  // con offset Y esplicito arrotondano tutti e 4 gli angoli. Calcolato qui
+  // (non nel layout sotto) perché entra nella chiave cache: il bitmap cambia.
+  const isRankBarStyle = rankingBadgeStyle === "bar"
+  const isRankNetflixRibbonStyle = rankingBadgeStyle === "netflix" && topBadge?.type === "rank"
+  const isRankDetached = !!topBadge && !isRankBarStyle && !isRankNetflixRibbonStyle && topBadgeOffsetY !== 0
+
   const genreBadgeKey = hasGenreBadge
     ? badgeCacheKey("genre", genreName, voteAverage, CW, year, badgeStyle, accentColorGenre, topLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
     : null
   const rankBadgeKey = !showComingSoon && topBadge
-    ? badgeCacheKey("rank", topBadge.type === "extra" ? topBadge.label : `${(topBadge as { rank: number }).rank}:${topBadge!.label}`, CW, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, topBadgeScale)
+    ? badgeCacheKey("rank", topBadge.type === "extra" ? topBadge.label : `${(topBadge as { rank: number }).rank}:${topBadge!.label}`, CW, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, topBadgeScale, isRankDetached ? "detached" : undefined)
     : null
   const qualityBadgeKey = hasQualityBadge
     ? badgeCacheKey("quality", quality, CW, topLight, qualityBadgeScale)
@@ -866,10 +876,10 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       ? (cacheGet<{ png: Buffer; w: number; h: number; isRank?: boolean }>(rankBadgeKey)
           || coalesceBadgeRender(rankBadgeKey, () => {
               if (topBadge!.type === "extra") {
-                return renderExtraBadge(topBadge!.label, topBadgePw, topLight, rankingBadgeStyle, accentColorRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
+                return renderExtraBadge(topBadge!.label, topBadgePw, topLight, rankingBadgeStyle, accentColorRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100, isRankDetached)
                   .then((r) => { const v = { ...r, isRank: false }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
               }
-              return renderRankingBadge((topBadge as { rank: number }).rank, rankingBadgeStyle === "netflix" ? badgePw : topBadgePw, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100)
+              return renderRankingBadge((topBadge as { rank: number }).rank, rankingBadgeStyle === "netflix" ? badgePw : topBadgePw, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100, isRankDetached)
                 .then((r) => { const v = { ...r, isRank: true }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
             }))
       : Promise.resolve(null),
@@ -964,7 +974,8 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     } else {
       // Offset solo stili centrati: la barra resta ancorata full-width.
       // In Cinematic Left la riga metadati sta sotto il logo a sinistra.
-      const badgeY = CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY + anchorShiftY
+      // Posizione unificata: altezza standardizzata per tutti gli stili, la baseline del testo non salta.
+      const badgeY = Math.min(CH - safeGenreBadgeResult.h, CH - safeGenreBadgeResult.h - Math.max(0, Math.round(targetCenter - safeGenreBadgeResult.h / 2)) + genreBadgeOffsetY + anchorShiftY)
       const badgeLeft = anchorRight
         ? Math.min(CW - safeGenreBadgeResult.w, Math.max(0, CW - safeGenreBadgeResult.w - rightPadX + anchorShiftX + genreBadgeOffsetX))
         : (isLandscapeLeft

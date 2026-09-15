@@ -8,12 +8,19 @@ import { posterUrl } from "@/lib/utils"
 import { ConfirmDialog } from "@/components/ConfirmDialog"
 import { Search, X, Square, CheckSquare, Trash2, Calendar, ArrowUpAZ, ChevronDown, Clapperboard, Tv, Sparkles, LayoutGrid, ListOrdered, RectangleHorizontal, RectangleVertical } from "lucide-react"
 import { http } from "@/lib/http"
-import { MoodBoardTile } from "@/components/MoodBoardTile"
+import { MoodBoardTile, type TileHandlers } from "@/components/MoodBoardTile"
 import { PosterLightbox } from "@/components/PosterLightbox"
 import { CollectionBar } from "@/components/CollectionBar"
 import { useCollections } from "@/lib/useCollections"
 import { useCountUp } from "@/lib/useCountUp"
 import type { Mapping } from "@/lib/types"
+
+// Contatore animato isolato: useCountUp fa setState a ogni frame per 600ms —
+// dentro MyPostersView ri-renderizzava l'intera griglia a ogni tick.
+function PosterCountBadge({ count }: { count: number }) {
+  const value = useCountUp(count)
+  return <>{value}</>
+}
 
 export function MyPostersView() {
   const mappings = usePSelector((v) => v.mappings)
@@ -24,7 +31,6 @@ export function MyPostersView() {
   const tvdbApiKey = usePSelector((v) => v.tvdbApiKey)
   const lang = usePSelector((v) => v.lang)
   const { t } = useT()
-  const posterCount = useCountUp(mappings.length)
   const [filter, setFilter] = useState("")
   // Ricerca reattiva: l'input resta immediato, filtro/sort/raggruppamento
   // della griglia rincorrono a priorità bassa (niente jank sul keystroke).
@@ -126,13 +132,13 @@ export function MyPostersView() {
     }
   }, [sortOpen])
 
-  const toggleSelect = (key: string) => {
+  const toggleSelect = useCallback((key: string) => {
     setSelected((prev) => {
       const next = new Set(prev)
       if (next.has(key)) next.delete(key); else next.add(key)
       return next
     })
-  }
+  }, [])
 
   // Cancella N mapping e riporta il numero di fallimenti: con Promise.all una
   // singola HTTP non-2xx farebbe fallire tutto senza feedback e lascerebbe i
@@ -254,29 +260,41 @@ export function MyPostersView() {
     return baseFiltered
   }, [baseFiltered, portraitItems, landscapeItems, formatFilter])
 
+  // Handler tile stabili (un solo oggetto): con memo le tile si ri-renderizzano
+  // solo se le loro props cambiano (isSelected/count), non a ogni tick del parent.
+  const tileHandlers: TileHandlers = useMemo(() => ({
+    select: (key: string) => toggleSelect(key),
+    open: (m: Mapping) => navigateToPoster(toSearchResult({ id: m.tmdbId, media_type: m.mediaType, title: m.title, name: m.title, poster_path: m.posterPath }), "myposters"),
+    quickView: (m: Mapping, rect: DOMRect) => setLightbox({ mapping: m, rect }),
+    remove: (m: Mapping, e: React.MouseEvent) => openRemoveConfirm(e, m),
+    toggleShape: (m: Mapping) => { void toggleMappingShape(m) },
+  }), [toggleSelect, navigateToPoster, openRemoveConfirm, toggleMappingShape])
+  // Conteggi collezioni pre-calcolati una volta: prima un .filter per tile a ogni render.
+  const tileCollectionCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const c of collections) {
+      for (const pid of c.posterIds) map.set(pid, (map.get(pid) ?? 0) + 1)
+    }
+    return map
+  }, [collections])
+
   const renderTiles = useCallback((items: Mapping[]) => (
-    items.map((m, idx) => (
-      <MoodBoardTile
-        key={`${m.mediaType}:${m.tmdbId}`}
-        mapping={m}
-        idx={idx}
-        selectMode={selectMode}
-        selected={selected}
-        onSelect={() => toggleSelect(`${m.mediaType}:${m.tmdbId}`)}
-        onOpen={() => navigateToPoster(toSearchResult({ id: m.tmdbId, media_type: m.mediaType, title: m.title, name: m.title, poster_path: m.posterPath }), "myposters")}
-        onQuickView={(e) => {
-          const target = e.currentTarget as HTMLElement
-          const tileEl = target.closest(".surface-card") || target.closest(".group") || target
-          const rect = tileEl ? tileEl.getBoundingClientRect() : new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0)
-          setLightbox({ mapping: m, rect })
-        }}
-        onRemove={(e) => openRemoveConfirm(e, m)}
-        onToggleShape={() => void toggleMappingShape(m)}
-        collectionCount={collections.filter((c) => c.posterIds.includes(`${m.mediaType}:${m.tmdbId}`)).length}
-        t={t}
-      />
-    ))
-  ), [selectMode, selected, navigateToPoster, openRemoveConfirm, toggleMappingShape, collections, t])
+    items.map((m, idx) => {
+      const key = `${m.mediaType}:${m.tmdbId}`
+      return (
+        <MoodBoardTile
+          key={key}
+          mapping={m}
+          idx={idx}
+          selectMode={selectMode}
+          isSelected={selected.has(key)}
+          handlers={tileHandlers}
+          collectionCount={tileCollectionCounts.get(key) ?? 0}
+          t={t}
+        />
+      )
+    })
+  ), [selectMode, selected, tileHandlers, tileCollectionCounts, t])
 
   useEffect(() => {
     if (!sortOpen) return
@@ -315,7 +333,7 @@ export function MyPostersView() {
             <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-zinc-50 flex items-center justify-center md:justify-start gap-3">
               {t("ui.myPostersTitle")}
               <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/10 text-muted tabular-nums" aria-label={t("ui.statusPosterCount", { count: mappings.length })}>
-                {posterCount}
+                <PosterCountBadge count={mappings.length} />
               </span>
             </h1>
             <p className="text-sm text-muted mt-1">{t("ui.myPostersSubtitle")}</p>

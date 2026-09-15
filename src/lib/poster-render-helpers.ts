@@ -114,6 +114,19 @@ export async function topLuminance(buf: Buffer): Promise<number> {
   return stats.mean / 255
 }
 
+/**
+ * Luminanza della striscia inferiore del poster (ultimo 8% di STD_H).
+ * Speculare a topLuminance: decide la polarità del badge genere in basso
+ * (bottomLight), che non può riusare il top su poster con alto chiaro e
+ * fondo scuro. Stesso pool di computeRegionStats, stessa metrica.
+ */
+export async function bottomLuminance(buf: Buffer): Promise<number> {
+  const stripH = Math.max(Math.round(STD_H * 0.08), 3)
+  const stats = await computeRegionStats(buf, 0, STD_H - stripH, STD_W, stripH)
+  if (!stats) return 0.5 // fallback: medium luminance
+  return stats.mean / 255
+}
+
 // B3: memo decode condivisi per extractBadgeColor (chiamato 2× — top+bottom —
 // sullo STESSO posterBuf/logoBuf da resolveBadgeColors). WeakMap keyed sul
 // Buffer: stesso oggetto = stessi byte, quindi niente invalidazione; le entry

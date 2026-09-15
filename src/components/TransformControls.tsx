@@ -6,7 +6,7 @@ import { usePSelector } from "@/lib/context"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { usePosterEditor } from "@/lib/contexts/PosterEditorContext"
 import { logoDefaultScale } from "@/lib/logo-selection"
-import { defaultGradientHeightForPoster } from "@/lib/gradient-defaults"
+import { defaultGradientHeightForPoster, defaultBlurFadeForPoster } from "@/lib/gradient-defaults"
 import { SliderRow } from "@/components/SliderRow"
 
 export function TransformControls() {
@@ -323,7 +323,7 @@ export function TransformControls() {
             {t("ui.blurSection")}
           </span>
           <button type="button" aria-label={t("ui.reset")}
-                  onClick={() => { ed.setGradientHeight(defaultGradientHeightForPoster(previewPoster)); ed.setBlurIntensity(20); ed.setBlurFade(50); ed.setBlurDarkness(30); ed.setTintStrength(20) }}
+                  onClick={() => { ed.setGradientHeight(defaultGradientHeightForPoster(previewPoster)); ed.setBlurIntensity(20); ed.setBlurFade(defaultBlurFadeForPoster(previewPoster)); ed.setBlurDarkness(30); ed.setTintStrength(20) }}
                   className="text-xs text-muted hover:text-accent transition-colors px-2 py-0.5 rounded-md border border-border/50 hover:border-accent/30">
             {t("ui.reset")}
           </button>
@@ -373,7 +373,7 @@ export function TransformControls() {
               boundsMin={0}
               boundsMax={100}
               onChange={(v) => ed.setBlurFade(v)}
-              onDoubleClick={() => ed.setBlurFade(ed.posterShape === "landscape" ? 70 : 50)}
+              onDoubleClick={() => ed.setBlurFade(ed.posterShape === "landscape" ? 70 : defaultBlurFadeForPoster(previewPoster))}
               editingValue={editingValue}
               editText={editText}
               setEditingValue={setEditingValue}

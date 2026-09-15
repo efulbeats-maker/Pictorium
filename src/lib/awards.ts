@@ -249,14 +249,29 @@ async function enwikiTitle(qid: string, signal?: AbortSignal): Promise<string | 
   }
 }
 
-function matchDirector(name: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string | null {  if (!name) return null
+/**
+ * Nome canonico del regista se in allowlist, altrimenti null. Usato per lo
+ * storage neutro in cache: la cache è per titolo, non per lingua, quindi non
+ * può contenere label già rese (chi chiede per primo in una lingua
+ * avvelenerebbe le altre per 24h). La resa avviene con directorBadgeLabel
+ * dove la locale è nota.
+ */
+export function matchDirectorName(name: string | null): string | null {
+  if (!name) return null
   const lower = name.toLowerCase().trim()
   for (const d of DIRECTORS) {
     if (lower === d.toLowerCase() || lower.includes(d.toLowerCase())) {
-      return t ? t("badge.director", { name: d }) : `Di ${d}`
+      return d
     }
   }
   return null
+}
+
+/** Etichetta localizzata a render-time dal nome canonico (mai dalla cache). */
+export function directorBadgeLabel(name: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string | null {
+  if (!name) return null
+  const canonical = matchDirectorName(name) ?? name
+  return t ? t("badge.director", { name: canonical }) : `Di ${canonical}`
 }
 
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000
@@ -264,12 +279,11 @@ const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000
 export async function fetchAllWikidata(
   tmdbId: number,
   mediaType: "movie" | "tv",
-  t?: (key: string, params?: Record<string, string | number>) => string,
   // R3: signal esterno (es. deadline render) — senza, il fetch sopravvive al
   // watchdog come zombie anche dopo il 503.
   signal?: AbortSignal,
 ): Promise<WikidataResult> {
-  const cacheKey = `wikidata:${mediaType}:${tmdbId}`
+  const cacheKey = `wikidata:v2:${mediaType}:${tmdbId}`
 
   // Check shared cache first (typed, with TTL). L1 + L2 KV cross-istanza:
   // la prima istanza che riesce condivide con tutte (prima ogni istanza
@@ -314,7 +328,8 @@ export async function fetchAllWikidata(
     // (vandalismo/decadimento dati: es. Q25191 senza label ma con sitelink
     // "Christopher Nolan"). Solo quando la label manca: 1 chiamata API
     // veloce, mai join sitelink in SPARQL (troppo lento, manda in timeout
-    // l'intera query). matchDirector usa comunque il nome canonico.
+    // l'intera query). In cache va il nome canonico (matchDirectorName),
+    // mai reso: la chiave non contiene la lingua.
     let director = [...directorLabels][0] || null
     if (!director) {
       const fallbackQid = [...directorQids][0]
@@ -323,13 +338,13 @@ export async function fetchAllWikidata(
         if (wikiTitle) director = wikiTitle
       }
     }
-    const directorBadge = matchDirector(director, t)
+    const directorName = matchDirectorName(director)
 
     const result: WikidataResult = {
       awards: matchRules([...awardLabels]),
       nominations: matchRules([...nominationLabels]),
       studios: matchStudios([...networkLabels]),
-      director: directorBadge,
+      director: directorName,
     }
 
     // Store in shared cache with tags for targeted invalidation

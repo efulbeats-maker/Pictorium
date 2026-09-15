@@ -19,7 +19,7 @@ import { useNavigation } from "./useNavigation"
 import { useMappingsStore } from "./useMappingsStore"
 import { usePosterEditor, PosterEditorProvider } from "./contexts/PosterEditorContext"
 import { usePosterSave } from "./usePosterSave"
-import { defaultGradientHeightForPoster } from "./gradient-defaults"
+import { defaultGradientHeightForPoster, defaultBlurFadeForPoster } from "./gradient-defaults"
 import { computeLogoOffsetBounds } from "./logo-layout"
 import { LAND_W, LAND_H } from "./constants"
 import { useOutsideDismiss } from "./useOutsideDismiss"
@@ -185,6 +185,7 @@ export interface PictoriumCtx {
   autoAccentColor: string | null
   setAccentColor: (v: string | null) => void
   topEdgeColor: string | null
+  bottomEdgeColor: string | null
   autoSaveExcludedPosters: (nextExcluded: string[], nextRotationPosters?: string[], nextPreviewPoster?: TMDBImage) => Promise<void>
   autoSaveExcludedBackdrops: (nextExcluded: string[], nextRotationBackdrops?: string[]) => Promise<void>
   /** Scalda le cache details/images per un titolo (hover risultati). */
@@ -473,6 +474,7 @@ export function usePictorium(): PictoriumCtx {
     else root.style.removeProperty("--color-accent")
   }, [uiAccent, accentColor])
   const [topEdgeColor, setTopEdgeColor] = useState<string | null>(null)
+  const [bottomEdgeColor, setBottomEdgeColor] = useState<string | null>(null)
   const [serviceErrors, setServiceErrors] = useState<Record<string, boolean>>({})
 
   const [loadingImages, setLoadingImages] = useState(false)
@@ -692,7 +694,7 @@ export function usePictorium(): PictoriumCtx {
         logoScale, logoOffsetX, logoOffsetY,
         backdropScale, backdropOffsetX, backdropOffsetY,
         metaInfo, trendRank, mdblistAnimeList: trending.mdblistAnimeList,
-        topEdgeColor, accentColor, lang, tmdbKey,
+        topEdgeColor, bottomEdgeColor, accentColor, autoAccentColor, lang, tmdbKey,
         region: editorCtx.defaultRegion,
       },
       { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
@@ -700,7 +702,7 @@ export function usePictorium(): PictoriumCtx {
     setPreviewUrl(url)
   }, [navigation.selected, navigation.previewPoster, navigation.selectedLogo, selectedBackdrop,
     logoScale, logoOffsetX, logoOffsetY, backdropScale, backdropOffsetX, backdropOffsetY,
-    metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, accentColor, lang, tmdbKey,
+    metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, bottomEdgeColor, accentColor, autoAccentColor, lang, tmdbKey,
     editorCtx.defaultRegion,
     globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
 
@@ -731,7 +733,7 @@ export function usePictorium(): PictoriumCtx {
     landscapePreview ? (selectedBackdrop ?? navigation.previewPoster) : navigation.previewPoster,
     metaInfo.genres[0]?.name,
     posterUrl,
-    { setAccentColor, setAutoAccentColor, setTopEdgeColor },
+    { setAccentColor, setAutoAccentColor, setTopEdgeColor, setBottomEdgeColor },
     landscapePreview ? "w780" : "w342",
   )
 
@@ -758,7 +760,7 @@ export function usePictorium(): PictoriumCtx {
     const [details, rankData, awardData] = await Promise.all([
       http<{ genres: { id: number; name: string }[]; voteAverage: number; voteCount: number; status: string | null; type: string | null; release_date: string | null; first_air_date: string | null; last_air_date: string | null; next_episode_to_air: { air_date: string; episode_number: number; season_number: number } | null; number_of_seasons: number | null; number_of_episodes: number | null; title: string | null; name: string | null; imdb_id: string | null; networks: { name: string; logo_path: string | null; origin_country?: string }[]; production_companies: { name: string; logo_path: string | null; origin_country?: string }[]; original_language: string; aggregatedRatings?: AggregatedRatings | null }>(detailsUrl, { timeout: 30000 }).catch((e) => { console.error("[pictorium] Details fetch failed:", e); setServiceErrors((prev) => ({ ...prev, tmdb: true })); return { genres: [] as { id: number; name: string }[], voteAverage: 0, voteCount: 0, status: null, type: null, release_date: null, first_air_date: null, last_air_date: null, next_episode_to_air: null, number_of_seasons: null, number_of_episodes: null, title: null, name: null, imdb_id: null, networks: [] as { name: string; logo_path: string | null; origin_country?: string }[], production_companies: [] as { name: string; logo_path: string | null; origin_country?: string }[], original_language: "en", aggregatedRatings: null } }),
       http<{ rank: number | null }>(`/api/trending/rank?type=${itemType}&id=${itemId}&api_key=${encodeURIComponent(tmdbKey)}&region=${encodeURIComponent(editorCtx.defaultRegion)}&lang=${encodeURIComponent(regionLang)}`, { timeout: 15000 }).catch(() => ({ rank: null })),
-      http<{ awards: string[]; nominations: string[]; studios: string[]; director: string | null; keywords: string[] }>(`/api/awards/${itemType}/${itemId}?api_key=${encodeURIComponent(tmdbKey)}`, { timeout: 15000 }).catch(() => ({ awards: [] as string[], nominations: [] as string[], studios: [] as string[], director: null, keywords: [] as string[] })),
+      http<{ awards: string[]; nominations: string[]; studios: string[]; director: string | null; keywords: string[] }>(`/api/awards/${itemType}/${itemId}?api_key=${encodeURIComponent(tmdbKey)}&lang=${encodeURIComponent(lang)}`, { timeout: 15000 }).catch(() => ({ awards: [] as string[], nominations: [] as string[], studios: [] as string[], director: null, keywords: [] as string[] })),
     ])
     const origLang = details.original_language
     const imageLangs = origLang && origLang !== lang && origLang !== "en" ? `${defaultImageLangs},${origLang}` : defaultImageLangs
@@ -848,16 +850,19 @@ export function usePictorium(): PictoriumCtx {
             if (autoLogo) {
               navigation.setPreviewPoster({ file_path: clean.file_path, iso_639_1: null, vote_average: 0, width: 0, height: 0 })
               setGradientHeight(defaultGradientHeightForPoster(clean))
+              setBlurFade(defaultBlurFadeForPoster(clean))
             } else {
               const enPoster = data.posters?.find((p: TMDBImage) => p.iso_639_1 === "en")
               const nextPoster = langPoster || enPoster || firstPoster || navigation.previewPoster
               navigation.setPreviewPoster(nextPoster)
               setGradientHeight(defaultGradientHeightForPoster(nextPoster))
+              setBlurFade(defaultBlurFadeForPoster(nextPoster))
             }
           } else {
             const nextPoster = langPoster || firstPoster || navigation.previewPoster
             navigation.setPreviewPoster(nextPoster)
             setGradientHeight(defaultGradientHeightForPoster(nextPoster))
+            setBlurFade(defaultBlurFadeForPoster(nextPoster))
           }
         }
       }
@@ -1045,7 +1050,10 @@ export function usePictorium(): PictoriumCtx {
           }
         }
         loadDefaultsToState()
-        if (chosenPoster) setGradientHeight(defaultGradientHeightForPoster(chosenPoster))
+        if (chosenPoster) {
+          setGradientHeight(defaultGradientHeightForPoster(chosenPoster))
+          setBlurFade(defaultBlurFadeForPoster(chosenPoster))
+        }
       }
     } finally {
       setLoadingImages(false)
@@ -1076,8 +1084,8 @@ export function usePictorium(): PictoriumCtx {
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
     genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
     networkLogoOffsetX, networkLogoOffsetY,
-    setGradientHeight,
-    rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, logoDisabled, setLogoDisabled,
+    setGradientHeight, setBlurFade,
+    rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, autoAccentColor, logoDisabled, setLogoDisabled,
     rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops,
     setLogoScale, setLogoOffsetX, setLogoOffsetY, networkLogo, lang, episodeGroupId, posterShape,
     defaultSashOrder,
@@ -1163,7 +1171,7 @@ export function usePictorium(): PictoriumCtx {
     exportData, importData, removeRecentSearch: search.removeRecentSearch, clearRecentSearches: search.clearRecentSearches,
     copyUrl, copied,
     accentColor, autoAccentColor, setAccentColor,
-    topEdgeColor,
+    topEdgeColor, bottomEdgeColor,
     autoSaveExcludedPosters,
     autoSaveExcludedBackdrops,
     prefetchTitle,
@@ -1190,7 +1198,7 @@ export function usePictorium(): PictoriumCtx {
     tmdbKeyInput, showKey, copied, mdblistApiKey, tvdbApiKey,
     serverHasTmdbKey,
     accentColor, autoAccentColor, setAccentColor,
-    topEdgeColor, autoSaveExcludedPosters, autoSaveExcludedBackdrops, prefetchTitle,
+    topEdgeColor, bottomEdgeColor, autoSaveExcludedPosters, autoSaveExcludedBackdrops, prefetchTitle,
     trending.trending, trending.trendingError, trending.streamingCharts, trending.mdblistAnimeList,
     trending.refreshLists,
     theme, uiAccent, serviceErrors, hasNetflixRank,

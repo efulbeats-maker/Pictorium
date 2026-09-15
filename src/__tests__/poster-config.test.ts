@@ -141,6 +141,41 @@ describe("resolvePosterRenderConfig", () => {
     expect(withoutRank.rankingBadgeStyle).toBe("colored")
   })
 
+  it("bordo/vetro ranking styles flow from query and server defaults", () => {
+    const fromQuery = resolvePosterRenderConfig(baseInput({
+      searchParams: new URLSearchParams({ rs: "vetro" }),
+    }))
+    expect(fromQuery.rankingBadgeStyle).toBe("vetro")
+    const fromDefaults = resolvePosterRenderConfig(baseInput({
+      sd: { rankingBadgeStyle: "bordo" },
+    }))
+    expect(fromDefaults.rankingBadgeStyle).toBe("bordo")
+  })
+
+  it("non-clean mappings without frozen values fall back to the poster-type defaults (20/80)", () => {
+    const r = resolvePosterRenderConfig(baseInput({
+      mapping: mapping({ language: "it" }),
+    }))
+    expect(r.blurHeight).toBe(20)
+    expect(r.blurFade).toBe(80)
+  })
+
+  it("clean mappings keep the global fallbacks (30/50)", () => {
+    const r = resolvePosterRenderConfig(baseInput({
+      mapping: mapping({ language: null }),
+    }))
+    expect(r.blurHeight).toBe(30)
+    expect(r.blurFade).toBe(50)
+  })
+
+  it("frozen mapping values beat the poster-type defaults", () => {
+    const r = resolvePosterRenderConfig(baseInput({
+      mapping: mapping({ language: "it", gradientHeight: 35, blurFade: 60 }),
+    }))
+    expect(r.blurHeight).toBe(35)
+    expect(r.blurFade).toBe(60)
+  })
+
   it("clamps out-of-range blur/gradient query values", () => {
     const r = resolvePosterRenderConfig(baseInput({
       searchParams: new URLSearchParams({ blur: "999", bf: "-5", bd: "250", gradHeight: "0" }),

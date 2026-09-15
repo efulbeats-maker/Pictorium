@@ -7,35 +7,39 @@ import type { Mapping } from "@/lib/types"
 import { effectiveMappingForShape } from "@/lib/types"
 import { PosterDepthEdge, PosterDepthSheen } from "@/components/PosterDepthGlow"
 
+export interface TileHandlers {
+  select: (key: string) => void
+  open: (m: Mapping) => void
+  quickView: (m: Mapping, rect: DOMRect) => void
+  remove: (m: Mapping, e: React.MouseEvent) => void
+  toggleShape: (m: Mapping) => void
+}
+
 interface MoodBoardTileProps {
   mapping: Mapping
   idx: number
   selectMode: boolean
-  selected: Set<string>
-  onSelect: () => void
-  onOpen: () => void
-  onQuickView: (e: React.MouseEvent) => void
-  onRemove: (e: React.MouseEvent) => void
-  onToggleShape: (e: React.MouseEvent) => void
+  isSelected: boolean
+  handlers: TileHandlers
   collectionCount?: number
   t: (key: string, params?: Record<string, string | number>) => string
 }
 
-export function MoodBoardTile({
+export const MoodBoardTile = React.memo(function MoodBoardTile({
   mapping: m,
   idx,
   selectMode,
-  selected,
-  onSelect,
-  onOpen,
-  onQuickView,
-  onRemove,
-  onToggleShape,
+  isSelected,
+  handlers,
   collectionCount = 0,
   t,
 }: MoodBoardTileProps) {
   const key = `${m.mediaType}:${m.tmdbId}`
-  const isSelected = selected.has(key)
+  const tileRectOf = (e: React.MouseEvent) => {
+    const target = e.currentTarget as HTMLElement
+    const tileEl = target.closest(".surface-card") || target.closest(".group") || target
+    return tileEl ? tileEl.getBoundingClientRect() : new DOMRect(window.innerWidth / 2, window.innerHeight / 2, 0, 0)
+  }
   const year = (m.releaseDate || m.firstAirDate || "").slice(0, 4)
   const typeLabel = m.mediaType === "movie"
     ? t("ui.movie")
@@ -52,11 +56,13 @@ export function MoodBoardTile({
 
   return (
     <div
-      className="animate-stagger-in"
-      style={{ animationDelay: `${Math.min(idx * 30, 300)}ms` }}
+      // Stagger solo alle prime tile: oltre, animazioni concorrenti mentre le
+      // immagini decodificano. tile-cv salta paint/layout fuori schermo.
+      className={idx < 12 ? "animate-stagger-in tile-cv" : "tile-cv"}
+      style={idx < 12 ? { animationDelay: `${Math.min(idx * 30, 300)}ms` } : undefined}
     >
       <div
-        onClick={() => { if (selectMode) onSelect(); else onOpen() }}
+        onClick={() => { if (selectMode) handlers.select(key); else handlers.open(m) }}
         role="button"
         tabIndex={0}
         aria-label={`${m.title} — ${m.logoPath ? t("ui.posterWithLogo") : t("ui.cleanPoster")} — ${typeLabel}`}
@@ -64,10 +70,10 @@ export function MoodBoardTile({
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault()
-            if (selectMode) onSelect(); else onOpen()
+            if (selectMode) handlers.select(key); else handlers.open(m)
           }
         }}
-        className={`surface-card group relative z-10 rounded-xl overflow-hidden transition-all duration-300 ease-out w-full border border-white/10 shadow-2xl hover:-translate-y-[3px] hover:scale-[1.015] hover:shadow-[0_22px_48px_rgba(0,0,0,0.48),0_0_22px_rgba(232,93,42,0.10)] hover:border-white/20 ${
+        className={`surface-card group relative z-10 rounded-xl overflow-hidden transition-transform duration-300 ease-out w-full border border-white/10 shadow-lg hover:-translate-y-[3px] hover:scale-[1.015] hover:shadow-[0_22px_48px_rgba(0,0,0,0.48),0_0_22px_rgba(232,93,42,0.10)] hover:border-white/20 ${
           selectMode
             ? isSelected
               ? "ring-2 ring-red-400/50 border-red-400/70"
@@ -105,11 +111,11 @@ export function MoodBoardTile({
         )}
 
         {/* Badge formato + DUAL (entrambi i profili salvati) */}
-        <span className="absolute top-2 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/60 text-zinc-300 backdrop-blur-md border border-white/10 pointer-events-none">
+        <span className="absolute top-2 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/70 text-zinc-300 border border-white/10 pointer-events-none">
           {isLandscape ? "16:9" : "2:3"}
         </span>
         {m.posterPath && m.backdropPath && (
-          <span className="absolute top-8 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-accent-orange/80 text-white backdrop-blur-md border border-white/10 pointer-events-none" title="DUAL">
+          <span className="absolute top-8 left-12 z-10 text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-accent-orange/90 text-white border border-white/10 pointer-events-none" title="DUAL">
             DUAL
           </span>
         )}
@@ -147,7 +153,7 @@ export function MoodBoardTile({
             <p className="text-sm font-semibold text-white truncate drop-shadow-lg">{m.title}</p>
             <div className="flex items-center gap-2 mt-1">
               {year && <span className="text-xs text-zinc-300 font-medium">{year}</span>}
-              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/15 text-zinc-200 font-semibold backdrop-blur-sm">
+              <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/15 text-zinc-200 font-semibold">
                 {typeLabel}
               </span>
             </div>
@@ -158,9 +164,12 @@ export function MoodBoardTile({
         {!selectMode && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onQuickView(e) }}
+            onClick={(e) => {
+              e.stopPropagation()
+              handlers.quickView(m, tileRectOf(e))
+            }}
             aria-label={t("ui.quickView")}
-            className="absolute top-2 right-2 w-10 h-10 rounded-full bg-black/60 backdrop-blur-md border border-white/10 flex items-center justify-center text-white/80 hover:bg-black/85 hover:text-white transition-all duration-200 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 active:scale-90 cursor-pointer shadow-lg z-10 touch-manipulation"
+            className="absolute top-2 right-2 w-10 h-10 rounded-full bg-black/75 border border-white/10 flex items-center justify-center text-white/80 hover:bg-black/85 hover:text-white transition-all duration-200 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 active:scale-90 cursor-pointer shadow-lg z-10 touch-manipulation"
           >
             <Maximize2 className="w-4 h-4" />
           </button>
@@ -170,9 +179,9 @@ export function MoodBoardTile({
         {!selectMode && (
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onQuickView(e) }}
+            onClick={(e) => { e.stopPropagation(); handlers.quickView(m, tileRectOf(e)) }}
             aria-label={t("ui.collections")}
-            className="absolute bottom-2 right-2 flex items-center gap-1 px-2.5 py-2 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 text-zinc-300 hover:text-white hover:bg-black/85 transition-all duration-200 active:scale-90 cursor-pointer z-10 touch-manipulation"
+            className="absolute bottom-2 right-2 flex items-center gap-1 px-2.5 py-2 rounded-lg bg-black/75 border border-white/10 text-zinc-300 hover:text-white hover:bg-black/85 transition-all duration-200 active:scale-90 cursor-pointer z-10 touch-manipulation"
           >
             <Folder className="w-3 h-3" />
             {collectionCount > 0 && (
@@ -186,7 +195,7 @@ export function MoodBoardTile({
           <button
             type="button"
             aria-label={t("ui.delete")}
-            onClick={(e) => { e.stopPropagation(); onRemove(e) }}
+            onClick={(e) => { e.stopPropagation(); handlers.remove(m, e) }}
             onKeyDown={(e) => e.stopPropagation()}
             className="absolute top-2 left-2 w-10 h-10 rounded-lg bg-red-900/70 flex items-center justify-center text-xs text-red-300 hover:bg-red-800 hover:text-red-200 active:scale-90 transition-all duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-lg shadow-black/30 touch-manipulation"
           >
@@ -200,9 +209,9 @@ export function MoodBoardTile({
             type="button"
             aria-label={isLandscape ? t("ui.setAsPortrait") : t("ui.setAsLandscape")}
             title={isLandscape ? t("ui.setAsPortrait") : t("ui.setAsLandscape")}
-            onClick={(e) => { e.stopPropagation(); onToggleShape(e) }}
+            onClick={(e) => { e.stopPropagation(); handlers.toggleShape(m) }}
             onKeyDown={(e) => e.stopPropagation()}
-            className="absolute bottom-2 left-2 w-10 h-10 rounded-lg bg-black/60 backdrop-blur-md border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-black/85 active:scale-90 transition-all duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-lg shadow-black/30 z-10 touch-manipulation"
+            className="absolute bottom-2 left-2 w-10 h-10 rounded-lg bg-black/75 border border-white/10 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-black/85 active:scale-90 transition-all duration-150 opacity-100 md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 cursor-pointer shadow-lg shadow-black/30 z-10 touch-manipulation"
           >
             {isLandscape ? <RectangleVertical className="w-4 h-4" /> : <RectangleHorizontal className="w-4 h-4" />}
           </button>
@@ -225,5 +234,5 @@ export function MoodBoardTile({
       <PosterDepthSheen sheenStrength={20} />
     </div>
   </div>
-)
-}
+  )
+})

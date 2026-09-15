@@ -20,6 +20,7 @@ import {
   type BadgeStyle,
   type RankingBadgeStyle,
 } from "./badge-styles"
+import { NON_CLEAN_GRADIENT_HEIGHT, NON_CLEAN_BLUR_FADE } from "./gradient-defaults"
 
 export function clamp(v: number, min: number, max: number): number {
   return Math.min(Math.max(v, min), max)
@@ -185,12 +186,16 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     : (m?.blurEnabled != null ? m.blurEnabled : (configOverride !== null ? configOverride.blurEnabled : true))
   // Clamp espliciti: impediscono a valori estremi (query o config) di arrivare a
   // sharp.blur con sigma enormi o gradienti fuori scala (potenziale DoS CPU).
+  // Mapping non-clean senza valori congelati: default per tipo poster (come
+  // l'editor all'apertura e gli URL Stremio), non i default globali. Vale solo
+  // a language esplicita: i mapping storici senza campo restano sul globale.
+  const mappingNonClean = m?.language != null
   const rawGradHeight = q.get("gradHeight") ? Number(q.get("gradHeight")) : NaN
   const blurHeight = Number.isFinite(rawGradHeight)
     ? clamp(rawGradHeight, 5, 100)
     : (m?.gradientHeight != null && Number.isFinite(m.gradientHeight)
         ? clamp(m.gradientHeight, 5, 100)
-        : (configOverride !== null ? clamp(configOverride.gradientHeight, 5, 100) : (posterShape === "landscape" ? 20 : 30)))
+        : (configOverride !== null ? clamp(configOverride.gradientHeight, 5, 100) : (posterShape === "landscape" ? 20 : (mappingNonClean ? NON_CLEAN_GRADIENT_HEIGHT : 30))))
   const rawBlur = q.get("blur") ? Number(q.get("blur")) : NaN
   const blurIntensity = Number.isFinite(rawBlur)
     ? clamp(rawBlur, 1, 100)
@@ -202,7 +207,7 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
     ? clamp(rawBf, 0, 100)
     : (m?.blurFade != null && Number.isFinite(m.blurFade)
         ? clamp(m.blurFade, 0, 100)
-        : (configOverride !== null ? clamp(configOverride.blurFade, 0, 100) : (posterShape === "landscape" ? 70 : 50)))
+        : (configOverride !== null ? clamp(configOverride.blurFade, 0, 100) : (posterShape === "landscape" ? 70 : (mappingNonClean ? NON_CLEAN_BLUR_FADE : 50))))
   const rawBd = q.get("bd") ? Number(q.get("bd")) : NaN
   const blurDarkness = Number.isFinite(rawBd)
     ? clamp(rawBd, 0, 100)

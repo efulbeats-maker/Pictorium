@@ -52,6 +52,8 @@ vi.mock("@/lib/awards", () => ({
   getAwardBadgeLabel: vi.fn(),
   getNominationBadgeLabel: vi.fn(),
   matchTMDBStudios: vi.fn(() => []),
+  matchDirectorName: vi.fn((name: string | null) => name),
+  directorBadgeLabel: vi.fn((name: string | null) => name),
 }))
 
 vi.mock("@/lib/mdblist", () => ({

@@ -13,6 +13,7 @@ import { getUpcomingReleaseLabel } from "@/lib/release-badge"
 import { getNewSeasonLabel, isKDramaOrigin } from "@/lib/poster-badge"
 import { isPrefixedKey, badgeKey } from "@/lib/i18n"
 import { getAllBadgeOptions } from "@/lib/badge-priority"
+import { isManualAccent } from "@/lib/accent-color"
 import { UI_RATING_SOURCES } from "@/lib/ratings"
 import { RatingSourceIcon } from "@/components/RatingSourceIcon"
 
@@ -36,11 +37,7 @@ export function BadgeControls() {
 
 
   const effectiveColor = accentColor || autoAccentColor || "#555555"
-  const isCustomColor = Boolean(
-    accentColor &&
-    autoAccentColor &&
-    accentColor.toLowerCase() !== autoAccentColor.toLowerCase()
-  )
+  const isCustomColor = isManualAccent(accentColor, autoAccentColor)
 
   return (
     <div className="space-y-3.5 text-xs">
@@ -306,7 +303,7 @@ export function BadgeControls() {
           <label className="text-[11px] text-muted font-medium block">{t("ui.styleRankingExtra")}</label>
           <BadgeStyleSelector
             value={ed.rankingBadgeStyle}
-            options={["default", "colored", "pill"]}
+            options={["default", "pill", "colored", "bordo", "vetro"]}
             onChange={ed.setRankingBadgeStyle}
             t={t}
             accentColor={accentColor}

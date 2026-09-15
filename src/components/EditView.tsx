@@ -28,6 +28,7 @@ import { Check, Clock, ExternalLink, Save, Trash2, X, ChevronLeft, RectangleVert
 
 export default function EditView() {
   const accentColor = usePSelector((v) => v.accentColor)
+  const autoAccentColor = usePSelector((v) => v.autoAccentColor)
   const clearRecentSearches = usePSelector((v) => v.clearRecentSearches)
   const doSearch = usePSelector((v) => v.doSearch)
   const goHome = usePSelector((v) => v.goHome)
@@ -66,6 +67,7 @@ export default function EditView() {
   const hasTmdbKey = !!tmdbKey || serverHasTmdbKey
   const tvdbApiKey = usePSelector((v) => v.tvdbApiKey)
   const topEdgeColor = usePSelector((v) => v.topEdgeColor)
+  const bottomEdgeColor = usePSelector((v) => v.bottomEdgeColor)
   const trendRank = usePSelector((v) => v.trendRank)
   const yearOf = usePSelector((v) => v.yearOf)
   const { t, lang } = useT()
@@ -474,7 +476,9 @@ export default function EditView() {
                         trendRank: trendRank,
                         mdblistAnimeList: mdblistAnimeList,
                         topEdgeColor: topEdgeColor,
+                        bottomEdgeColor: bottomEdgeColor,
                         accentColor: accentColor,
+                        autoAccentColor: autoAccentColor,
                         lang: lang,
                         tmdbKey: tmdbKey,
                       }, {

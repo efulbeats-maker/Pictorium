@@ -322,6 +322,43 @@ describe("buildPreviewUrl", () => {
     expect(url).not.toContain("ac=")
   })
 
+  it("does not include ac param when accentColor equals the auto-detected color", () => {
+    const url = buildPreviewUrl(
+      { ...basePosterState, accentColor: "#aabbcc", autoAccentColor: "#AABBCC" },
+      baseBadgeParams,
+    )
+    expect(url).not.toContain("ac=")
+  })
+
+  it("includes ac param when accentColor differs from the auto-detected color", () => {
+    const url = buildPreviewUrl(
+      { ...basePosterState, accentColor: "#ff0000", autoAccentColor: "#aabbcc" },
+      baseBadgeParams,
+    )
+    expect(url).toContain("ac=%23ff0000")
+  })
+
+  it("omits bl param when bottomEdgeColor is not computed (server decides)", () => {
+    const url = buildPreviewUrl({ ...basePosterState, bottomEdgeColor: null }, baseBadgeParams)
+    expect(url).not.toContain("bl=")
+  })
+
+  it("emits bl=1 for a light bottom without blur", () => {
+    const url = buildPreviewUrl(
+      { ...basePosterState, bottomEdgeColor: "#f0f0f0" },
+      { ...baseBadgeParams, blurEnabled: false },
+    )
+    expect(url).toContain("bl=1")
+  })
+
+  it("emits bl=0 for a light bottom darkened by the blur band", () => {
+    const url = buildPreviewUrl(
+      { ...basePosterState, bottomEdgeColor: "#f0f0f0" },
+      baseBadgeParams,
+    )
+    expect(url).toContain("bl=0")
+  })
+
   it("includes badges=1 when globalBadges is true", () => {
     const url = buildPreviewUrl(basePosterState, { ...baseBadgeParams, globalBadges: true })
     expect(url).toContain("badges=1")

@@ -265,6 +265,10 @@ input[type="range"]::-moz-range-thumb:active {
 .animate-scale-in { animation: scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
 .animate-pulse-ring { animation: pulse-ring 2s infinite; }
 .animate-stagger-in { animation: stagger-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* Tile griglia My Posters: salta paint/layout fuori schermo (scroll fluido
+   senza virtualizer). contain-intrinsic-size evita salti di scrollbar. */
+.tile-cv { content-visibility: auto; contain-intrinsic-size: auto 480px; }
 .animate-shimmer-subtle { animation: shimmer-subtle 2s ease-in-out infinite; }
 @keyframes shake {
   0%, 100% { transform: translateX(0); }

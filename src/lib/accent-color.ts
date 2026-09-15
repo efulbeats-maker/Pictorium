@@ -1,4 +1,5 @@
 import { GENRE_FALLBACK } from "./badges"
+import { TOP_LIGHT_LUMINANCE } from "./constants"
 
 export interface AccentResult { r: number; g: number; b: number }
 
@@ -375,4 +376,63 @@ export function topEdgeAverage(pixels: Uint8ClampedArray | Buffer, width: number
     }
   }
   return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) }
+}
+
+/** Media del bordo inferiore (ultimo 8% delle righe): speculare a topEdgeAverage. */
+export function bottomEdgeAverage(pixels: Uint8ClampedArray | Buffer, width: number, height: number): { r: number; g: number; b: number } {
+  const rowCount = Math.max(Math.round(height * 0.08), 3)
+  let r = 0, g = 0, b = 0, n = 0
+  for (let y = height - rowCount; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      r += pixels[i]; g += pixels[i + 1]; b += pixels[i + 2]
+      n++
+    }
+  }
+  return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) }
+}
+
+/**
+ * Luminanza Rec.709 di un hex "#rrggbb", null se assente/malformato.
+ * Stessi coefficienti di computeTopLight (poster-url.ts) e soglia condivisa
+ * TOP_LIGHT_LUMINANCE: il client deve accordarsi col server.
+ */
+export function hexLuminance(hexColor: string | null | undefined): number | null {
+  if (!hexColor || hexColor.length < 7) return null
+  const r = parseInt(hexColor.slice(1, 3), 16) / 255
+  const g = parseInt(hexColor.slice(3, 5), 16) / 255
+  const b = parseInt(hexColor.slice(5, 7), 16) / 255
+  if (![r, g, b].every(Number.isFinite)) return null
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/**
+ * Polarità del badge inferiore (true = fondo chiaro → pill scura).
+ * Come topLight ma corretta per la banda blur: la banda scurisce il fondo in
+ * proporzione a blurDarkness, quindi una striscia chiara con blur intenso conta
+ * come scura. Approssimazione documentata: la banda è un blend non uniforme,
+ * qui modellato come velo nero uniforme (stima conservativa: preferisce la
+ * pill chiara, sempre leggibile sullo scuro).
+ */
+export function computeBottomLight(lum: number | null, blurDarkness: number, blurEnabled: boolean): boolean | null {
+  if (lum === null || !Number.isFinite(lum)) return null
+  const d = Math.max(0, Math.min(100, blurDarkness)) / 100
+  const effective = blurEnabled ? lum * (1 - d) : lum
+  return effective > TOP_LIGHT_LUMINANCE
+}
+
+/**
+ * Vero solo quando l'utente ha scelto un colore diverso da quello
+ * auto-rilevato: l'auto-rilevamento scrive lo stesso valore in entrambi gli
+ * stati a ogni cambio poster, quindi un `ac=` emesso sempre scavalcerebbe il
+ * calcolo server anche quando l'utente non ha toccato nulla (preview e
+ * mapping salvato congelerebbero il thumb client invece della tinta di scena).
+ */
+export function isManualAccent(
+  accentColor: string | null | undefined,
+  autoAccentColor: string | null | undefined,
+): boolean {
+  if (!accentColor) return false
+  if (!autoAccentColor) return true
+  return accentColor.toLowerCase() !== autoAccentColor.toLowerCase()
 }

@@ -1,6 +1,15 @@
 export const CLEAN_GRADIENT_HEIGHT = 30
-export const NON_CLEAN_GRADIENT_HEIGHT = 10
+export const NON_CLEAN_GRADIENT_HEIGHT = 20
 
 export function defaultGradientHeightForPoster(poster: { iso_639_1?: string | null } | null | undefined): number {
   return poster?.iso_639_1 === null ? CLEAN_GRADIENT_HEIGHT : NON_CLEAN_GRADIENT_HEIGHT
+}
+
+export const CLEAN_BLUR_FADE = 50
+export const NON_CLEAN_BLUR_FADE = 80
+
+/** Fade di default per tipo poster (come l'altezza): sul non-clean, con poco
+ *  titolo stampato da coprire, serve una transizione più lunga e morbida. */
+export function defaultBlurFadeForPoster(poster: { iso_639_1?: string | null } | null | undefined): number {
+  return poster?.iso_639_1 === null ? CLEAN_BLUR_FADE : NON_CLEAN_BLUR_FADE
 }

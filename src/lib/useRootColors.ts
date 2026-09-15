@@ -7,19 +7,20 @@
 
 import { useEffect } from "react"
 import type { TMDBImage } from "./types"
-import { findSceneTint, topEdgeAverage } from "./accent-color"
+import { findSceneTint, topEdgeAverage, bottomEdgeAverage } from "./accent-color"
 
 interface RootColorsSetters {
   setAccentColor: (v: string | null) => void
   setAutoAccentColor?: (v: string | null) => void
   setTopEdgeColor: (v: string | null) => void
+  setBottomEdgeColor?: (v: string | null) => void
 }
 
 export function useRootColors(
   previewPoster: TMDBImage | null,
   genreName: string | undefined,
   posterUrl: (path: string, size?: string) => string,
-  { setAccentColor, setAutoAccentColor, setTopEdgeColor }: RootColorsSetters,
+  { setAccentColor, setAutoAccentColor, setTopEdgeColor, setBottomEdgeColor }: RootColorsSetters,
   size = "w342",
 ): void {
   useEffect(() => {
@@ -32,7 +33,7 @@ export function useRootColors(
       root.style.setProperty("--color-edge-r", "85")
       root.style.setProperty("--color-edge-g", "85")
       root.style.setProperty("--color-edge-b", "85")
-      setAccentColor(null); setAutoAccentColor?.(null); setTopEdgeColor(null); return
+      setAccentColor(null); setAutoAccentColor?.(null); setTopEdgeColor(null); setBottomEdgeColor?.(null); return
     }
     let cancelled = false
     // C4: niente cache-busting (?cb=Date.now): i path TMDB sono immutabili,
@@ -42,7 +43,7 @@ export function useRootColors(
     const url = posterUrl(previewPoster.file_path, size)
     const img = new Image()
     img.crossOrigin = "anonymous"
-    const setRootColors = (r: number, g: number, b: number, edgeR: number, edgeG: number, edgeB: number) => {
+    const setRootColors = (r: number, g: number, b: number, edgeR: number, edgeG: number, edgeB: number, bottomR: number, bottomG: number, bottomB: number) => {
       const c = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`
       root.style.setProperty("--color-accent", c)
       root.style.setProperty("--color-accent-r", String(r))
@@ -56,6 +57,7 @@ export function useRootColors(
       setAccentColor(c)
       setAutoAccentColor?.(c)
       setTopEdgeColor(edgeC)
+      setBottomEdgeColor?.(`#${bottomR.toString(16).padStart(2, '0')}${bottomG.toString(16).padStart(2, '0')}${bottomB.toString(16).padStart(2, '0')}`)
     }
     img.onload = () => {
       if (cancelled) return
@@ -75,11 +77,12 @@ export function useRootColors(
         // il server (es. Silo verde -> rosa complementare). Niente logo.
         const result = findSceneTint(pixels, w, h, genreName || '')
         const edge = topEdgeAverage(pixels, w, h)
+        const bottom = bottomEdgeAverage(pixels, w, h)
 
-        setRootColors(result.r, result.g, result.b, edge.r, edge.g, edge.b)
+        setRootColors(result.r, result.g, result.b, edge.r, edge.g, edge.b, bottom.r, bottom.g, bottom.b)
       } catch { /* color detection is non-critical */ }
     }
-    img.onerror = () => { if (!cancelled) { setRootColors(85, 85, 85, 85, 85, 85) } }
+    img.onerror = () => { if (!cancelled) { setRootColors(85, 85, 85, 85, 85, 85, 85, 85, 85) } }
     img.src = url
     return () => { cancelled = true }
     // La semantica dell'effetto originale: gira solo quando cambia il poster

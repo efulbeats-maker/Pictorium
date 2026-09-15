@@ -172,6 +172,11 @@ export const posterQuerySchema = z.object({
   format: boundedQueryString(8),
   shape: boundedQueryString(16),
   align: boundedQueryString(8),
+  ac: boundedQueryString(10),
+  tl: boundedQueryString(8),
+  bl: boundedQueryString(8),
+  bs: boundedQueryString(16),
+  rs: boundedQueryString(16),
 })
 
 export type PosterQuery = z.infer<typeof posterQuerySchema>

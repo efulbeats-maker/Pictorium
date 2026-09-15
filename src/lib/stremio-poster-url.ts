@@ -3,6 +3,7 @@ import { buildStremioPosterSearchParams } from "@/lib/stremio-poster-params"
 import { isRankKey } from "@/lib/i18n"
 import type { ServerDefaults } from "@/lib/server-defaults"
 import { effectiveMappingForShape, type Mapping, type PosterShape } from "@/lib/types"
+import { NON_CLEAN_GRADIENT_HEIGHT, NON_CLEAN_BLUR_FADE } from "@/lib/gradient-defaults"
 
 export type StremioPosterType = "movie" | "series"
 
@@ -99,11 +100,13 @@ export function buildStremioPosterUrl(input: BuildStremioPosterUrlInput): URL {
     networkLogoScale: eff?.networkLogoScale ?? input.defaults.networkLogoScale,
     networkLogoOffsetX: eff?.networkLogoOffsetX ?? input.defaults.networkLogoOffsetX,
     networkLogoOffsetY: eff?.networkLogoOffsetY ?? input.defaults.networkLogoOffsetY,
-    gradientHeight: eff?.gradientHeight ?? input.defaults.gradientHeight,
+    gradientHeight: eff?.gradientHeight ?? (mapping?.language != null ? NON_CLEAN_GRADIENT_HEIGHT : input.defaults.gradientHeight),
     blurIntensity: eff?.blurIntensity ?? input.defaults.blurIntensity,
     // Default sfumatura dedicato al formato (come logoAlign): in landscape
     // serve una transizione più lunga; il portrait resta sul default globale.
-    blurFade: eff?.blurFade ?? ((input.forceShape ?? mapping?.posterShape ?? input.defaults.posterShape) === "landscape" ? 70 : input.defaults.blurFade),
+    // Mapping non-clean senza valori congelati: 20/80 per tipo poster (come
+    // l'editor all'apertura) invece dei default globali.
+    blurFade: eff?.blurFade ?? ((input.forceShape ?? mapping?.posterShape ?? input.defaults.posterShape) === "landscape" ? 70 : (mapping?.language != null ? NON_CLEAN_BLUR_FADE : input.defaults.blurFade)),
     blurDarkness: eff?.blurDarkness ?? input.defaults.blurDarkness,
     blurEnabled: eff?.blurEnabled ?? input.defaults.blurEnabled,
     tintStrength: eff?.tintStrength ?? input.defaults.tintStrength,

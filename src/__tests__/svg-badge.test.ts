@@ -1,6 +1,6 @@
 import sharp from "sharp"
 import { describe, expect, it } from "vitest"
-import { buildGenrePillSvg, buildGenreTextSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops, buildGenreGlassSvg, buildGenreBorderedSvg, buildRankingGlassSvg, buildRankingBorderedSvg } from "@/lib/badge-svg-shared"
+import { buildGenrePillSvg, buildGenreTextSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops, buildGenreGlassSvg, buildGenreBorderedSvg, buildRankingGlassSvg, buildRankingBorderedSvg, buildExtraBorderedSvg } from "@/lib/badge-svg-shared"
 import { buildGenreBadgeSVG, buildRankingBadgeSVG, buildExtraBadgeSVG, buildNetflixRankBadgeSVG, renderComingSoonRibbon, comingSoonRibbonLayout } from "@/lib/svg-badge"
 
 async function alphaBounds(png: Buffer) {
@@ -19,6 +19,27 @@ async function alphaBounds(png: Buffer) {
   }
 
   return { minX, maxX, width: info.width }
+}
+
+/**
+ * Conta i pixel scuri e coprenti nella fascia centrale del badge.
+ * I badge traslucidi (vetro/bordo) hanno testo sempre chiaro: qualsiasi pixel
+ * scuro lì dentro è un glifo scuro, cioè il bug (testo scuro su vetro/fumé).
+ * I margini laterali sono esclusi: il bordo 2px è scuro per disegno sul top
+ * chiaro, il testo sta sempre al centro (padding >= 0.75*fs).
+ */
+async function darkPixelCount(png: Buffer) {
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  let n = 0
+  const y0 = Math.floor(info.height * 0.3), y1 = Math.ceil(info.height * 0.7)
+  const x0 = 8, x1 = info.width - 8
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * info.width + x) * 4
+      if (data[i] < 60 && data[i + 1] < 60 && data[i + 2] < 60 && data[i + 3] > 100) n++
+    }
+  }
+  return n
 }
 
 describe("buildGenreBadgeSVG", () => {
@@ -246,6 +267,20 @@ describe("buildRankingBadgeSVG", () => {
     expect(badge!.w).toBeGreaterThan(0)
   })
 
+  it("renders vetro ranking badge with the glass gradient", async () => {
+    const badge = await buildRankingBadgeSVG(2, 1000, "Oggi", false, "vetro", "#555555")
+    expect(badge).not.toBeNull()
+    expect(badge!.w).toBeGreaterThan(50)
+    expect(buildRankingGlassSvg("#2 Oggi", 30, "#fff", "", false).svg).toContain('fill="url(#rg)"')
+  })
+
+  it("renders bordo ranking badge with a 2px calibrated stroke", async () => {
+    const badge = await buildRankingBadgeSVG(2, 1000, "Oggi", false, "bordo", "#555555")
+    expect(badge).not.toBeNull()
+    expect(badge!.w).toBeGreaterThan(50)
+    expect(buildRankingBorderedSvg("#2 Oggi", 30, "#fff", false).svg).toContain('stroke-width="2"')
+  })
+
   it("uses satin gradient ribbon + adaptive text when top is dark", () => {
     const { svg } = buildNetflixRankBadgeSVG(4, 1000, false)
     expect(svg).toContain('fill="url(#nrg)"')
@@ -353,6 +388,62 @@ describe("buildExtraBadgeSVG", () => {
     expect(badge).not.toBeNull()
     expect(badge!.w).toBeLessThanOrEqual(500)
     expect(badge!.w).toBeGreaterThan(0)
+  })
+
+  it("renders bordo extra badge with a 2px calibrated stroke", async () => {
+    const badge = await buildExtraBadgeSVG("Oscar 2024", 1000, false, "bordo", "#555555")
+    expect(badge).not.toBeNull()
+    expect(badge!.w).toBeGreaterThan(50)
+    expect(buildExtraBorderedSvg("Oscar 2024", 30, "#fff", false).svg).toContain('stroke-width="2"')
+  })
+
+  it("renders vetro extra badge with the glass gradient", async () => {
+    const badge = await buildExtraBadgeSVG("Oscar 2024", 1000, false, "vetro", "#555555")
+    expect(badge).not.toBeNull()
+    expect(badge!.w).toBeGreaterThan(50)
+  })
+})
+
+describe("translucent badges adapt text to the background (like quality/netflix)", () => {
+  it("ranking vetro: light text on dark top, dark text on light top", async () => {
+    const dark = await buildRankingBadgeSVG(6, 1000, "Film", false, "vetro", "#555555")
+    expect(await darkPixelCount(dark!.png)).toBe(0)
+    const light = await buildRankingBadgeSVG(6, 1000, "Film", true, "vetro", "#555555")
+    expect(await darkPixelCount(light!.png)).toBeGreaterThan(0)
+  })
+
+  it("ranking bordo: light text on dark top, dark text on light top", async () => {
+    const dark = await buildRankingBadgeSVG(6, 1000, "Film", false, "bordo", "#555555")
+    expect(await darkPixelCount(dark!.png)).toBe(0)
+    const light = await buildRankingBadgeSVG(6, 1000, "Film", true, "bordo", "#555555")
+    expect(await darkPixelCount(light!.png)).toBeGreaterThan(0)
+  })
+
+  it("extra vetro/bordo: light text on dark top, dark text on light top", async () => {
+    const darkVetro = await buildExtraBadgeSVG("Oscar 2024", 1000, false, "vetro", "#555555")
+    expect(await darkPixelCount(darkVetro!.png)).toBe(0)
+    const lightVetro = await buildExtraBadgeSVG("Oscar 2024", 1000, true, "vetro", "#555555")
+    expect(await darkPixelCount(lightVetro!.png)).toBeGreaterThan(0)
+    const darkBordo = await buildExtraBadgeSVG("Oscar 2024", 1000, false, "bordo", "#555555")
+    expect(await darkPixelCount(darkBordo!.png)).toBe(0)
+    const lightBordo = await buildExtraBadgeSVG("Oscar 2024", 1000, true, "bordo", "#555555")
+    expect(await darkPixelCount(lightBordo!.png)).toBeGreaterThan(0)
+  })
+
+  it("genre vetro/bordo follow the bottom light, like the top follows the top", async () => {
+    const darkVetro = await buildGenreBadgeSVG("Dramma", 8.2, 1000, "2024", "vetro", "#555555", false)
+    expect(await darkPixelCount(darkVetro!.png)).toBe(0)
+    const lightVetro = await buildGenreBadgeSVG("Dramma", 8.2, 1000, "2024", "vetro", "#555555", true)
+    expect(await darkPixelCount(lightVetro!.png)).toBeGreaterThan(0)
+    const darkBordo = await buildGenreBadgeSVG("Dramma", 8.2, 1000, "2024", "bordo", "#555555", false)
+    expect(await darkPixelCount(darkBordo!.png)).toBe(0)
+    const lightBordo = await buildGenreBadgeSVG("Dramma", 8.2, 1000, "2024", "bordo", "#555555", true)
+    expect(await darkPixelCount(lightBordo!.png)).toBeGreaterThan(0)
+  })
+
+  it("control: opaque ranking default keeps dark text on a dark top", async () => {
+    const badge = await buildRankingBadgeSVG(6, 1000, "Film", false, "default", "#555555")
+    expect(await darkPixelCount(badge!.png)).toBeGreaterThan(0)
   })
 })
 

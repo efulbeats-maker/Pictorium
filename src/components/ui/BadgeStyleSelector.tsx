@@ -42,7 +42,10 @@ export function BadgeStyleSelector<S extends string>({
   accentColor?: string | null
   disabled?: readonly S[]
 }) {
-  const gridCols = options.length <= 3 ? "grid-cols-3" : options.length <= 6 ? "grid-cols-3 sm:grid-cols-6" : "grid-cols-3 sm:grid-cols-4 md:grid-cols-7"
+  // Colonne esatte per conteggio (classi letterali: Tailwind le genera solo se scritte per esteso):
+  // 5 opzioni in 6 colonne lascerebbero un buco a destra e pulsanti di larghezza
+  // diversa dalla riga da 7 — ogni riga riempie la larghezza con i suoi pulsanti.
+  const gridCols = options.length <= 3 ? "grid-cols-3" : options.length <= 5 ? "grid-cols-3 sm:grid-cols-5" : options.length <= 6 ? "grid-cols-3 sm:grid-cols-6" : "grid-cols-3 sm:grid-cols-4 md:grid-cols-7"
   return (
     <div className={`grid ${gridCols} gap-1.5 w-full`}>
       {options.map((s) => {

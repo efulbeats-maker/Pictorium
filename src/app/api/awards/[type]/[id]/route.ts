@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server"
-import { fetchAllWikidata } from "@/lib/awards"
+import { fetchAllWikidata, directorBadgeLabel } from "@/lib/awards"
+import { createT } from "@/lib/i18n"
 import { getKeywords } from "@/lib/tmdb"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { createLogger } from "@/lib/logger"
@@ -25,7 +26,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       fetchAllWikidata(tmdbId, mediaType),
       getKeywords(mediaType, tmdbId, apiKey),
     ])
-    return Response.json({ ...data, keywords })
+    // Il director in cache è canonico (chiave senza lingua): reso qui nella
+    // lingua richiesta (default "it" = comportamento storico senza lang).
+    const lang = req.nextUrl.searchParams.get("lang") || "it"
+    return Response.json({ ...data, director: directorBadgeLabel(data.director, createT(lang)), keywords })
   } catch (e) {
     log.warn("Awards fetch failed", { mediaType, tmdbId, error: e instanceof Error ? e.message : String(e) })
     return Response.json({ error: "Awards data unavailable" }, { status: 502 })

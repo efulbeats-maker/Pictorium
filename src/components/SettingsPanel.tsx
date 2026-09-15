@@ -703,7 +703,7 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
           </label>
           <BadgeStyleSelector
             value={ed.defaultRankingBadgeStyle}
-            options={["default", "colored", "pill"]}
+            options={["default", "pill", "colored", "bordo", "vetro"]}
             onChange={(v) => {
               ed.setDefaultRankingBadgeStyle(v)
             }}

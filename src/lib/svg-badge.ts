@@ -1,9 +1,18 @@
 import fs from "fs"
 import { textColorForBg } from "./accent-color"
 import { FONT_FILES, FONT_INTER_REGULAR, FONT_INTER_BOLD, FONT_INTER_BLACK, FONT_SYMBOLS } from "./fonts"
-import { estimateTextWidth, fontFamilyFor, genreBadgeSafePad, genreBadgeSvgDims, genrePillMaxW, BADGE_BOX_PAD_X_FACTOR, buildGenreBarSvg, buildGenrePillSvg, buildGenreTextSvg, buildGenreBorderedSvg, buildGenreGlassSvg, buildRankingBarSvg, buildRankingDefaultSvg, buildRankingPillSvg, buildExtraBarSvg, buildExtraDefaultSvg, buildExtraPillSvg, buildExtraGlassSvg, buildQualityBadgeSvg, escSvg, satinPillStops } from "./badge-svg-shared"
+import { estimateTextWidth, fontFamilyFor, genreBadgeSafePad, genreBadgeSvgDims, genrePillMaxW, BADGE_BOX_PAD_X_FACTOR, buildGenreBarSvg, buildGenrePillSvg, buildGenreTextSvg, buildGenreBorderedSvg, buildGenreGlassSvg, buildRankingBarSvg, buildRankingDefaultSvg, buildRankingPillSvg, buildRankingGlassSvg, buildRankingBorderedSvg, buildExtraBarSvg, buildExtraDefaultSvg, buildExtraPillSvg, buildExtraGlassSvg, buildExtraBorderedSvg, buildQualityBadgeSvg, escSvg, satinPillStops } from "./badge-svg-shared"
 import type { GenreParts } from "./badge-svg-shared"
 import type { BadgeStyle, RankingBadgeStyle, ExtraBadgeStyle } from "./badge-styles"
+
+/**
+ * Polo chiaro del testo adattivo (l'altro è rgba(0,0,0,0.80)): stesso bianco
+ * del badge genere. I badge traslucidi (vetro/bordo) adattano il testo allo
+ * sfondo effettivo come la pill opaca della qualità — ma al contrario: il
+ * vetro su fondo chiaro è chiaro (testo scuro), sul fondo scuro è trasparente
+ * (testo chiaro). Il fumé del bordo non copre abbastanza per un testo fisso.
+ */
+const TRANSLUCENT_BADGE_TEXT = "#e5e7eb"
 
 
 let _regular: Buffer | null = null
@@ -143,8 +152,8 @@ export async function buildExtraBadgeSVG(
   const bg = coloredBg || (topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)")
   const fg = isColored
     ? textColorForBg(accentColor || "")
-    : isGlass
-      ? (topLight ? "rgba(0,0,0,0.80)" : "#ffffff")
+    : (isGlass || s === "bordo")
+      ? (topLight ? "rgba(0,0,0,0.80)" : TRANSLUCENT_BADGE_TEXT)
       : (topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)")
 
   let result: { svg: string; w: number; h: number }
@@ -154,6 +163,8 @@ export async function buildExtraBadgeSVG(
     result = buildExtraPillSvg(label, fs, fg, bg, !!topLight)
   } else if (isGlass) {
     result = buildExtraGlassSvg(label, fs, fg, bg, !!topLight)
+  } else if (s === "bordo") {
+    result = buildExtraBorderedSvg(label, fs, fg, !!topLight)
   } else {
     result = buildExtraDefaultSvg(label, fs, fg, bg, detached)
   }
@@ -165,7 +176,7 @@ export async function buildExtraBadgeSVG(
 
 export async function buildGenreBadgeSVG(
   genreName: string, voteAverage: number, pw: number,
-  year?: string, style?: BadgeStyle, accentColor?: string, topLight?: boolean, parts?: GenreParts,
+  year?: string, style?: BadgeStyle, accentColor?: string, bottomLight?: boolean, parts?: GenreParts,
   /** Scala % applicata al font solo per lo stile barra (gli altri scalano via bitmap nel service). */
   scale = 100,
 ): Promise<{ png: Buffer; w: number; h: number } | null> {
@@ -210,27 +221,30 @@ export async function buildGenreBadgeSVG(
   const isPill = s === "pill" || s === "colored"
   const isBar = s === "bar"
 
+  const isTranslucent = s === "vetro" || s === "bordo"
   const textColor = s === "colored"
     ? textColorForBg(accentColor || "")
-    : (isPill && s === "pill" && topLight)
-      // Pill satinata: su poster chiaro la pill diventa grafite → testo chiaro.
-      ? "rgba(255,255,255,0.85)"
-      : (isPill ? "rgba(0,0,0,0.80)" : "#e5e7eb")
+    : isTranslucent
+      ? (bottomLight ? "rgba(0,0,0,0.80)" : TRANSLUCENT_BADGE_TEXT)
+      : (isPill && s === "pill" && bottomLight)
+        // Pill satinata: su fondo chiaro la pill diventa grafite → testo chiaro.
+        ? "rgba(255,255,255,0.85)"
+        : (isPill ? "rgba(0,0,0,0.80)" : TRANSLUCENT_BADGE_TEXT)
   const bgColor = s === "colored"
     ? (accentColor && accentColor !== "#555555" ? accentColor : "rgba(255,255,255,0.80)")
     : (isPill ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)")
 
   let result: { svg: string; w: number; h: number }
   if (s === "bordo") {
-    result = buildGenreBorderedSvg(genreName, voteStr, yearStr, fs, textColor, topLight ?? false, 0, parts)
+    result = buildGenreBorderedSvg(genreName, voteStr, yearStr, fs, textColor, bottomLight ?? false, 0, parts)
   } else if (s === "vetro") {
-    result = buildGenreGlassSvg(genreName, voteStr, yearStr, fs, textColor, topLight ?? false, 0, parts)
+    result = buildGenreGlassSvg(genreName, voteStr, yearStr, fs, textColor, bottomLight ?? false, 0, parts)
   } else if (isBar) {
-    result = buildGenreBarSvg(genreName, voteStr, yearStr, pw, fs, "rgba(0,0,0,0.80)", !!topLight, 0, parts)
+    result = buildGenreBarSvg(genreName, voteStr, yearStr, pw, fs, "rgba(0,0,0,0.80)", !!bottomLight, 0, parts)
   } else if (isPill) {
     // colored: tinta piatta (niente satinatura); pill: satinatura polare.
     const useSatin = s !== "colored"
-    result = buildGenrePillSvg(genreName, voteStr, yearStr, fs, bgColor, textColor, 0, parts, !!topLight, useSatin)
+    result = buildGenrePillSvg(genreName, voteStr, yearStr, fs, bgColor, textColor, 0, parts, !!bottomLight, useSatin)
   } else {
     result = buildGenreTextSvg(genreName, voteStr, yearStr, fs, textColor, s, 0, parts)
     // Per shadow, il renderW include shadowPad*2 + safePad*2 aggiuntivi
@@ -250,10 +264,10 @@ export async function buildGenreBadgeSVG(
 
 export async function renderGenreBadge(
   genreName: string, voteAverage: number, pw: number,
-  year?: string, style?: BadgeStyle, accentColor?: string, topLight?: boolean, parts?: GenreParts,
+  year?: string, style?: BadgeStyle, accentColor?: string, bottomLight?: boolean, parts?: GenreParts,
   scale = 100,
 ): Promise<{ png: Buffer; w: number; h: number }> {
-  const r = await buildGenreBadgeSVG(genreName, voteAverage, pw, year, style, accentColor, topLight, parts, scale)
+  const r = await buildGenreBadgeSVG(genreName, voteAverage, pw, year, style, accentColor, bottomLight, parts, scale)
   if (r) return r
   throw new Error(`SVG genre badge failed: ${genreName}`)
 }
@@ -386,7 +400,9 @@ export async function buildRankingBadgeSVG(
   const bg = coloredBg || (topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)")
   const fg = isColored
     ? textColorForBg(accentColor || "")
-    : (topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)")
+    : (s === "vetro" || s === "bordo")
+      ? (topLight ? "rgba(0,0,0,0.80)" : TRANSLUCENT_BADGE_TEXT)
+      : (topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)")
 
   let result: { svg: string; w: number; h: number }
   if (isNetflix) {
@@ -397,6 +413,10 @@ export async function buildRankingBadgeSVG(
     result = buildRankingBarSvg(fullText, pw, fs, fg, bg)
   } else if (s === "pill") {
     result = buildRankingPillSvg(fullText, fs, fg, bg, !!topLight)
+  } else if (s === "vetro") {
+    result = buildRankingGlassSvg(fullText, fs, fg, bg, !!topLight)
+  } else if (s === "bordo") {
+    result = buildRankingBorderedSvg(fullText, fs, fg, !!topLight)
   } else {
     // colored: passa la tinta accent come flatBg (resta piatta); default: gradiente.
     result = buildRankingDefaultSvg(fullText, fs, fg, bg, !!topLight, isColored ? bg : undefined, detached)

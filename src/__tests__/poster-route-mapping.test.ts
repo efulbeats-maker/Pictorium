@@ -63,6 +63,8 @@ vi.mock("@/lib/awards", () => ({
   getAwardBadgeLabel: vi.fn(),
   getNominationBadgeLabel: vi.fn(),
   matchTMDBStudios: vi.fn(() => []),
+  matchDirectorName: vi.fn((name: string | null) => name),
+  directorBadgeLabel: vi.fn((name: string | null) => name),
 }))
 
 vi.mock("@/lib/mdblist", () => ({
@@ -831,6 +833,35 @@ describe("GET /api/poster/[type]/[id] error and edge cases", () => {
     })
     const res2 = await GET(req2, { params: Promise.resolve({ type: "movie", id: "42" }) })
     expect(res2.status).toBe(304)
+  })
+
+  it("emits Server-Timing with render phases on the render path", async () => {
+    const posterBuf = await imageBuffer("#202020", 500, 750)
+    mockedGetById.mockResolvedValue({
+      tmdbId: 43,
+      mediaType: "movie",
+      title: "Test Timing",
+      posterPath: "/poster.jpg",
+      logoPath: null,
+      originalPosterPath: null,
+      language: "it",
+      updatedAt: "2026-07-16T10:15:30.000Z",
+    })
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(new Uint8Array(posterBuf), {
+        status: 200,
+        headers: { "content-type": "image/png", "content-length": String(posterBuf.length) },
+      }),
+    )
+    const res = await GET(new NextRequest("http://localhost:3000/api/poster/movie/43"), {
+      params: Promise.resolve({ type: "movie", id: "43" }),
+    })
+    expect(res.status).toBe(200)
+    const timing = res.headers.get("Server-Timing") ?? ""
+    expect(timing).toMatch(/fetch;dur=\d+/)
+    expect(timing).toMatch(/prep;dur=\d+/)
+    expect(timing).toMatch(/composite;dur=\d+/)
+    expect(timing).toMatch(/total;dur=\d+/)
   })
 
   it("handles IMDB ID (tt...) resolution to TMDB ID", async () => {

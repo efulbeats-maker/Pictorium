@@ -11,7 +11,7 @@ import { getRegionDef, normalizeRegion, parseRegion, defaultRegionForLang } from
 import { BEST_FIT_GLOBAL } from "@/lib/best-fit-config"
 import { warmFonts } from "@/lib/svg-badge"
 import { selectBestLogoFitPosterPath } from "@/lib/poster-auto-fit"
-import { fetchAllWikidata, matchTMDBStudios } from "@/lib/awards"
+import { fetchAllWikidata, matchTMDBStudios, directorBadgeLabel } from "@/lib/awards"
 import { createT } from "@/lib/i18n"
 import type { EnrichedAnimeItem } from "@/lib/validation"
 import { fetchMDBList, type MDBListEntry } from "@/lib/mdblist"
@@ -22,6 +22,7 @@ import { getTMDBSessionCache, setTMDBSessionCache } from "@/lib/tmdb-session-cac
 import { mappingVersionParam } from "@/lib/stremio-poster-url"
 import { RENDER_VERSION } from "@/lib/render-version"
 import { envWithFallback } from "@/lib/env-compat"
+import { TOP_LIGHT_LUMINANCE } from "@/lib/constants"
 import {
   RENDER_SLOT_WAIT_MS,
   acquirePosterRenderSlot,
@@ -48,6 +49,7 @@ import {
   recordPosterCoalescedHit,
   recordTvdbRescue,
   recordBackdropCropRescue,
+  serverTimingValue,
   resolveImageFormat,
   type PosterCachePayload,
   type PosterErrorStatus,
@@ -60,7 +62,9 @@ import {
   imgSrc,
   isValidHex,
   topLuminance,
+  bottomLuminance,
 } from "@/lib/poster-render-helpers"
+import { computeBottomLight } from "@/lib/accent-color"
 import { LAND_W, LAND_H, landscapeBackdropUrl, pillarboxLandscapeBase, cropBackdropToPortrait } from "@/lib/image-utils"
 import { generatePosterBuffer, type GenerationInput } from "@/lib/poster-service"
 import { computeTopBadge } from "@/lib/poster-badge"
@@ -345,7 +349,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     if (!cachedPoster.stale) {
       log.debug("Poster cache: fresh hit", { mediaType, tmdbId, ms: Date.now() - startTime })
       if (outputFormat === "webp") return serveWebpVariant(cachedPoster.payload)
-      return posterResponse(cachedPoster.payload, immutablePoster, isPreview, dynamicPoster, outputFormat, dynamicTtlSec)
+      return posterResponse(cachedPoster.payload, immutablePoster, isPreview, dynamicPoster, outputFormat, dynamicTtlSec,
+        serverTimingValue([{ name: "cache", desc: "HIT" }, { name: "total", durMs: Date.now() - startTime }]))
     }
     if (!refreshRequest) {
       recordPosterStaleHit()
@@ -1037,7 +1042,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           })
           const result = await Promise.race([
             rankingEnabledEarly
-              ? fetchAllWikidata(tmdbId, mediaType, t, combineAbortSignals(renderAbort.signal, wdAbort.signal)).catch(() => emptyWikidata)
+              ? fetchAllWikidata(tmdbId, mediaType, combineAbortSignals(renderAbort.signal, wdAbort.signal)).catch(() => emptyWikidata)
               : Promise.resolve(emptyWikidata),
             wikidataTimeout,
           ])
@@ -1130,6 +1135,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     const qLabel = req.nextUrl.searchParams.get("label")
     const finalRank = qRank !== null ? (parseInt(qRank, 10) >= 0 ? parseInt(qRank, 10) : rankingRank) : rankingRank
 
+    // Fase 6 (observability): fine della fase fetch (mapping/defaults + TMDB +
+    // JW + wikidata + immagini + selezione logo). Da qui in poi solo CPU locale.
+    const tFetchMs = Date.now() - startTime
+
     // 6. Resize poster + compute luminance
     // Landscape: base = sfondo TMDB ritagliato sul canvas 16:9, oppure
     // pillarbox dal poster quando il titolo non ha sfondi.
@@ -1139,6 +1148,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           : await pillarboxLandscapeBase(baseBuf))
       : await sharp(baseBuf).resize(STD_W, STD_H, { fit: 'cover', position: 'centre' }).toBuffer()
     const qTopLight = req.nextUrl.searchParams.get("tl")
+    const qBottomLight = req.nextUrl.searchParams.get("bl")
 
     // Apply mapping TV metadata (synchronous — no race, no side-effects in parallel closures)
     if (mapping?.tvType) tvType = mapping.tvType
@@ -1147,11 +1157,15 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     if (mapping?.firstAirDate) firstAirDate = mapping.firstAirDate
 
     // Luminance + optional TV details fetch (parallel, independent)
-    const [customRatings, topLum] = await Promise.all([
+    const [customRatings, topLum, bottomLum] = await Promise.all([
       customRatingConfig.enabled ? fetchCustomRatings(imdbId, customRatingConfig, renderAbort.signal) : Promise.resolve([]),
       (async (): Promise<number | null> => {
         if (qTopLight === "1" || qTopLight === "0" || qTopLight === "true" || qTopLight === "false") return null
         return await topLuminance(posterBuf)
+      })(),
+      (async (): Promise<number | null> => {
+        if (qBottomLight === "1" || qBottomLight === "0" || qBottomLight === "true" || qBottomLight === "false") return null
+        return await bottomLuminance(posterBuf)
       })(),
       (tmdbNetworks.length === 0 && productionCompanies.length === 0)
         ? (async () => {
@@ -1189,7 +1203,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         : Promise.resolve(),
     ])
 
-    const topLight = (qTopLight === "1" || qTopLight === "true") ? true : (qTopLight === "0" || qTopLight === "false") ? false : (topLum ?? 0.5) > 0.60
+    const topLight = (qTopLight === "1" || qTopLight === "true") ? true : (qTopLight === "0" || qTopLight === "false") ? false : (topLum ?? 0.5) > TOP_LIGHT_LUMINANCE
 
     // 7. Parse blur / badge / logo config from query
     const renderConfig = resolvePosterRenderConfig({
@@ -1219,6 +1233,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       queryExtra, qNetLogo, networkLogo, ribbonSide,
       preRelease, posterShape, logoAlign, hideLogo,
     } = renderConfig
+
+    // Polarità del badge genere in basso: speculare a topLight, ma corretta per
+    // la banda blur (che scurisce il fondo) — vedi computeBottomLight. `bl`
+    // esplicito vince (preview WYSIWYG), altrimenti decide il server.
+    const bottomLight = (qBottomLight === "1" || qBottomLight === "true") ? true : (qBottomLight === "0" || qBottomLight === "false") ? false : (computeBottomLight(bottomLum, blurDarkness, blurEnabled) ?? topLight)
 
     // Il rilevamento (`preReleaseDetected`) cambia nel tempo: non entra nella
     // cache key (verrebbe letta prima del fetch), il ritorno al poster normale
@@ -1259,7 +1278,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         awards: wikidataResult.awards,
         nominations: wikidataResult.nominations,
         studios: tmdbStudios.length ? [...tmdbStudios] : [...productionCompanies, ...tmdbNetworks],
-        director: wikidataResult.director,
+        director: directorBadgeLabel(wikidataResult.director, t),
         tvType: tvType ?? null,
         tvStatus,
         keywords: [...tmdbKeywords],
@@ -1301,6 +1320,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           nominations: wikidataResult.nominations,
           studios: wikidataResult.studios,
           director: wikidataResult.director,
+          directorLabel: directorBadgeLabel(wikidataResult.director, t),
         },
         keywords: [...tmdbKeywords],
         badge: {
@@ -1325,8 +1345,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
             customBadge: queryExtra,
           },
         },
+        timings: {
+          fetchMs: tFetchMs,
+          prepMs: Date.now() - startTime - tFetchMs,
+          totalMs: Date.now() - startTime,
+        },
         appearance: {
           topLight,
+          bottomLight,
           blurEnabled,
           blurHeight,
           blurIntensity,
@@ -1372,7 +1398,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality,
       sashOrder,
       quality: finalQuality,
-      topLight, targetCenter, ribbonSide,
+      topLight, bottomLight, targetCenter, ribbonSide,
       logoScale, logoOffsetX, logoOffsetY,
       topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
       genreBadgeScale, qualityBadgeScale, networkLogoScale,
@@ -1399,6 +1425,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     if (renderAbort.signal.aborted) {
       throw new Error("Render deadline exceeded before poster compositing")
     }
+    // Fine della fase prep (resize, config, accent): da qui solo composite CPU.
+    const tCompositeStart = Date.now()
     const composited = await generatePosterBuffer(genInput)
     if (customRatingConfig.enabled) {
       etag = `${etag.slice(0, -1)}:cr${hashKey(JSON.stringify(genInput.ratings))}"`
@@ -1419,10 +1447,19 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
     if (customRatingConfig.enabled && !isPreview && req.headers.get("If-None-Match") === responseEtag) {
       return new Response(null, { status: 304, headers: posterNotModifiedHeaders(responseEtag, immutablePoster, dynamicPoster, dynamicTtlSec) })
     }
-    log.info("Poster rendered", { mediaType, tmdbId, ms: Date.now() - startTime, bytes: composited.byteLength, cached: !!mappingTag, format: outputFormat })
+    log.info("Poster rendered", { mediaType, tmdbId, ms: Date.now() - startTime, bytes: composited.byteLength, cached: !!mappingTag, format: outputFormat, fetchMs: tFetchMs, prepMs: tCompositeStart - startTime - tFetchMs, compositeMs: Date.now() - tCompositeStart })
     // C3: il webp è variante di risposta (convertita + cachata), non un render.
     if (outputFormat === "webp") return serveWebpVariant(payload)
-    return new Response(new Uint8Array(composited), { headers: posterHeaders(etag, immutablePoster, isPreview, dynamicPoster, outputFormat, dynamicTtlSec) })
+    const renderHeaders = {
+      ...posterHeaders(etag, immutablePoster, isPreview, dynamicPoster, outputFormat, dynamicTtlSec),
+      "Server-Timing": serverTimingValue([
+        { name: "fetch", durMs: tFetchMs },
+        { name: "prep", durMs: tCompositeStart - startTime - tFetchMs },
+        { name: "composite", durMs: Date.now() - tCompositeStart },
+        { name: "total", durMs: Date.now() - startTime },
+      ]),
+    }
+    return new Response(new Uint8Array(composited), { headers: renderHeaders })
   } catch (e) {
     completePosterRender(null)
     recordPosterError()

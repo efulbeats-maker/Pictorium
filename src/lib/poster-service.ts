@@ -29,9 +29,11 @@ import { PRE_RELEASE_DIM_ALPHA, PRE_RELEASE_BLUR_SIGMA } from "./pre-release"
 import type { Mapping } from "./types"
 import type { ServerDefaults } from "./server-defaults"
 import type { WikidataResult } from "./awards"
+import { directorBadgeLabel } from "./awards"
 import type { BadgeT } from "./poster-badge"
 import type { BadgeStyle, RankingBadgeStyle } from "./badge-styles"
 import type { PosterImageFormat } from "@/lib/poster-runtime-cache"
+import { RENDER_VERSION } from "./render-version"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,6 +96,8 @@ export interface GenerationInput {
   /** Ordine/priorità sash (sottoinsieme = resto spento). Default = ordine standard. */
   sashOrder?: readonly SashBucket[] | null
   topLight: boolean
+  /** Polarità del badge genere in basso (fondo chiaro → pill scura). Default = topLight (comportamento storico). */
+  bottomLight?: boolean
   targetCenter: number
   /** Modalità layout nastro Netflix + logo network: "left" (Nuvio, default) o "right" (Stremio). */
   ribbonSide: "left" | "right"
@@ -246,11 +250,13 @@ async function getPreReleaseDim(canvasW: number = STD_W, canvasH: number = STD_H
 // Badge cache helpers (coalescing)
 // ---------------------------------------------------------------------------
 
-function badgeCacheKey(type: string, ...parts: (string | number | boolean | undefined | null)[]): string {
-  // Fix L1: i segmenti stringa vengono escapati — una label utente con ":" 
+export function badgeCacheKey(type: string, ...parts: (string | number | boolean | undefined | null)[]): string {
+  // Fix L1: i segmenti stringa vengono escapati — una label utente con ":"
   // (es. customBadge "Top:10") prima produceva chiavi ambigue collidenti con
   // i campi successivi (segmenti di lunghezza variabile separati da ":").
-  return `badge:${type}:${parts.map(p => typeof p === "number" ? Math.round(p * 10) / 10 : (typeof p === "string" ? encodeURIComponent(p) : (p ?? "x"))).join(":")}`
+  // La versione di resa invalida le bitmap quando il codice di rendering
+  // cambia (altrimenti resterebbero in cache fino a BADGE_CACHE_TTL).
+  return `badge:${type}:${RENDER_VERSION}:${parts.map(p => typeof p === "number" ? Math.round(p * 10) / 10 : (typeof p === "string" ? encodeURIComponent(p) : (p ?? "x"))).join(":")}`
 }
 
 const badgeInflight = new Map<string, Promise<unknown>>()
@@ -553,6 +559,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, quality,
     sashOrder,
     topLight, targetCenter, ribbonSide,
+    bottomLight: bottomLightOpt,
     logoScale, logoOffsetX, logoOffsetY,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY,
     genreBadgeScale, qualityBadgeScale, networkLogoScale,
@@ -572,6 +579,11 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     logoAlign,
     shape,
   } = input
+
+  // Il badge genere in basso segue la luce del fondo, non del top (su poster
+  // con alto chiaro e fondo scuro la pill restava grafite su nero). Chiamanti
+  // vecchi/test diretti che non passano bottomLight ricadono sul top.
+  const bottomLight = bottomLightOpt ?? topLight
 
   // Dimensioni canvas: portrait (default, byte-identico al passato) o
   // landscape 16:9 (prova ?shape=landscape, base = backdrop TMDB).
@@ -743,7 +755,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     awards: wikidataResult.awards,
     nominations: wikidataResult.nominations,
     studios: wikidataResult.studios,
-    director: wikidataResult.director,
+    director: directorBadgeLabel(wikidataResult.director, t),
     tvType: tvType ?? null,
     tvStatus,
     keywords: [...tmdbKeywords],
@@ -852,7 +864,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   const isRankDetached = !!topBadge && !isRankBarStyle && !isRankNetflixRibbonStyle && topBadgeOffsetY !== 0
 
   const genreBadgeKey = hasGenreBadge
-    ? badgeCacheKey("genre", genreName, voteAverage, CW, year, badgeStyle, accentColorGenre, topLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
+    ? badgeCacheKey("genre", genreName, voteAverage, CW, year, badgeStyle, accentColorGenre, bottomLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
     : null
   const rankBadgeKey = !showComingSoon && topBadge
     ? badgeCacheKey("rank", topBadge.type === "extra" ? topBadge.label : `${(topBadge as { rank: number }).rank}:${topBadge!.label}`, CW, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, topBadgeScale, isRankDetached ? "detached" : undefined)
@@ -868,7 +880,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     genreBadgeKey
       ? (cacheGet<{ png: Buffer; w: number; h: number }>(genreBadgeKey)
           || coalesceBadgeRender(genreBadgeKey, () =>
-              renderGenreBadge(genreName ?? "", voteAverage ?? 0, badgePw, year, badgeStyle, accentColorGenre, topLight, { showGenre: badgeGenre, showYear: badgeYear, showRating: badgeRating }, badgeStyle === "bar" ? genreBadgeScale : 100)
+                renderGenreBadge(genreName ?? "", voteAverage ?? 0, badgePw, year, badgeStyle, accentColorGenre, bottomLight, { showGenre: badgeGenre, showYear: badgeYear, showRating: badgeRating }, badgeStyle === "bar" ? genreBadgeScale : 100)
                 .then((r) => { if (r) cacheSet(genreBadgeKey, r, ["badge"], BADGE_CACHE_TTL); return r })
             ))
       : Promise.resolve(null),
@@ -986,7 +998,8 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   }
   if (input.ratings?.length) {
     // Optional enrichment must never prevent the original poster from rendering.
-    const row = await renderMultiRatings(input.ratings, CW - 40, topLight).catch(() => null)
+    // La riga sta sopra il badge genere, in basso: stessa polarità del fondo.
+    const row = await renderMultiRatings(input.ratings, CW - 40, bottomLight).catch(() => null)
     if (row) {
       const legacyTop = safeGenreBadgeResult
         ? (badgeStyle === "bar" ? CH - safeGenreBadgeResult.h

@@ -1,6 +1,6 @@
 ﻿import { describe, it, expect } from "vitest"
 import sharp from "sharp"
-import { findSceneTint, findAccentColor } from "@/lib/accent-color"
+import { findSceneTint, findAccentColor, isManualAccent, computeBottomLight, hexLuminance, bottomEdgeAverage } from "@/lib/accent-color"
 import { extractSceneTint } from "@/lib/poster-render-helpers"
 import { GENRE_FALLBACK } from "@/lib/badges"
 
@@ -145,5 +145,84 @@ describe("extractSceneTint (poster-render-helpers)", () => {
     const b = parseInt(hex.slice(5, 7), 16)
     expect(g).toBeGreaterThan(r + 10)
     expect(g).toBeGreaterThan(b - 10)
+  })
+})
+
+describe("isManualAccent (manual vs auto-detected accent)", () => {
+  it("false when no accent is set", () => {
+    expect(isManualAccent(null, "#aabbcc")).toBe(false)
+    expect(isManualAccent(undefined, undefined)).toBe(false)
+  })
+
+  it("true when set with no auto reference", () => {
+    expect(isManualAccent("#ff0000", null)).toBe(true)
+    expect(isManualAccent("#ff0000", undefined)).toBe(true)
+  })
+
+  it("false when the accent equals the auto-detected color (case-insensitive)", () => {
+    expect(isManualAccent("#aabbcc", "#AABBCC")).toBe(false)
+  })
+
+  it("true when the accent differs from the auto-detected color", () => {
+    expect(isManualAccent("#ff0000", "#aabbcc")).toBe(true)
+  })
+})
+
+describe("computeBottomLight (genre badge polarity from the bottom strip)", () => {
+  it("null when the strip was not measured", () => {
+    expect(computeBottomLight(null, 30, true)).toBeNull()
+  })
+
+  it("true for a light strip without blur", () => {
+    expect(computeBottomLight(0.8, 30, false)).toBe(true)
+  })
+
+  it("false for a dark strip", () => {
+    expect(computeBottomLight(0.3, 0, false)).toBe(false)
+  })
+
+  it("blur darkness pulls a light strip below the threshold", () => {
+    // 0.94 * (1 - 0.40) = 0.564 < 0.60: la banda scurisce, la pill resta chiara.
+    expect(computeBottomLight(0.94, 40, true)).toBe(false)
+    expect(computeBottomLight(0.94, 40, false)).toBe(true)
+  })
+
+  it("clamps darkness outside 0-100", () => {
+    expect(computeBottomLight(0.8, 200, true)).toBe(false)
+    expect(computeBottomLight(0.8, -50, true)).toBe(true)
+  })
+})
+
+describe("hexLuminance", () => {
+  it("white is 1, black is 0", () => {
+    expect(hexLuminance("#ffffff")).toBeCloseTo(1, 5)
+    expect(hexLuminance("#000000")).toBe(0)
+  })
+
+  it("null for missing or malformed input", () => {
+    expect(hexLuminance(null)).toBeNull()
+    expect(hexLuminance("#fff")).toBeNull()
+    expect(hexLuminance("not-a-color")).toBeNull()
+  })
+})
+
+describe("bottomEdgeAverage", () => {
+  it("samples the bottom rows, not the top", () => {
+    const w = 100, h = 100
+    const raw = Buffer.alloc(w * h * 4)
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4
+        const bottom = y >= h - Math.max(Math.round(h * 0.08), 3)
+        raw[i] = bottom ? 200 : 10
+        raw[i + 1] = bottom ? 200 : 10
+        raw[i + 2] = bottom ? 200 : 10
+        raw[i + 3] = 255
+      }
+    }
+    const { r, g, b } = bottomEdgeAverage(raw, w, h)
+    expect(r).toBeGreaterThan(150)
+    expect(g).toBeGreaterThan(150)
+    expect(b).toBeGreaterThan(150)
   })
 })

@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server"
 import { cacheGet, cacheGetStale, cacheSet } from "@/lib/cache"
 import { createLogger } from "@/lib/logger"
 import { envWithFallback } from "@/lib/env-compat"
+import { isBadgeStyle, isRankingBadgeStyle } from "@/lib/badge-styles"
 
 const log = createLogger("poster-cache")
 
@@ -85,6 +86,28 @@ export function normalizePosterCacheParams(searchParams: URLSearchParams): URLSe
   params.delete("rv")
   params.delete("v")
   params.delete(POSTER_REFRESH_PARAM)
+
+  const ac = params.get("ac")
+  if (ac !== null && !/^#([0-9A-Fa-f]{3}){1,2}$/.test(ac)) {
+    params.delete("ac")
+  }
+  const tl = params.get("tl")
+  if (tl !== null && tl !== "1" && tl !== "0" && tl !== "true" && tl !== "false") {
+    params.delete("tl")
+  }
+  const bl = params.get("bl")
+  if (bl !== null && bl !== "1" && bl !== "0" && bl !== "true" && bl !== "false") {
+    params.delete("bl")
+  }
+  const bs = params.get("bs")
+  if (bs !== null && !isBadgeStyle(bs)) {
+    params.delete("bs")
+  }
+  const rs = params.get("rs")
+  if (rs !== null && !isRankingBadgeStyle(rs)) {
+    params.delete("rs")
+  }
+
   return params
 }
 
@@ -201,8 +224,33 @@ export function posterNotModifiedHeaders(etag: string, immutable: boolean, dynam
   }
 }
 
-export function posterResponse(payload: PosterCachePayload, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg", dynamicTtlSec?: number): Response {
-  return new Response(new Uint8Array(payload.buffer), { headers: posterHeaders(payload.etag, immutable, isPreview, dynamic, format, dynamicTtlSec) })
+export interface ServerTimingEntry {
+  readonly name: string
+  readonly durMs?: number
+  readonly desc?: string
+}
+
+/**
+ * Valore `Server-Timing` per le risposte poster (`fetch;dur=123, total;dur=456`,
+ * `cache;desc="HIT", total;dur=4`). Diagnostica per-request senza righe di log
+ * aggiuntive: la scomposizione fetch/prep/composite vive già nel log
+ * "Poster rendered". Solo esposizione, mai raccolta di dati personali.
+ */
+export function serverTimingValue(entries: readonly ServerTimingEntry[]): string {
+  return entries
+    .map((e) => {
+      const dur = e.durMs === undefined ? "" : `;dur=${Math.max(0, Math.round(e.durMs))}`
+      const desc = e.desc === undefined ? "" : `;desc="${e.desc}"`
+      return `${e.name}${desc}${dur}`
+    })
+    .join(", ")
+}
+
+export function posterResponse(payload: PosterCachePayload, immutable: boolean, isPreview: boolean = false, dynamic: boolean = false, format: PosterImageFormat = "jpeg", dynamicTtlSec?: number, serverTiming?: string): Response {
+  const headers = posterHeaders(payload.etag, immutable, isPreview, dynamic, format, dynamicTtlSec)
+  return new Response(new Uint8Array(payload.buffer), {
+    headers: serverTiming ? { ...headers, "Server-Timing": serverTiming } : headers,
+  })
 }
 
 export function readCachedPoster(cacheKey: string): { readonly payload: PosterCachePayload | null; readonly stale: boolean } {

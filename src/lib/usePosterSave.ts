@@ -5,9 +5,10 @@ import type { SearchResult, TMDBImage, Mapping, PosterShape } from "./types"
 import { titleOf } from "./utils"
 import { computeTopBadge, type BadgeInput } from "./poster-badge"
 import type { SashBucket } from "./badge-priority"
-import { defaultGradientHeightForPoster } from "./gradient-defaults"
+import { defaultGradientHeightForPoster, defaultBlurFadeForPoster } from "./gradient-defaults"
 import { logoDefaultScale } from "./logo-selection"
 import { t } from "./i18n"
+import { isManualAccent } from "./accent-color"
 import type { EnrichedAnimeItem } from "./validation"
 import { http } from "./http"
 
@@ -56,6 +57,7 @@ interface PosterSaveDeps {
   tintStrength: number
   gradientHeight: number
   setGradientHeight: (v: number) => void
+  setBlurFade: (v: number) => void
   topBadgeScale: number
   topBadgeOffsetX: number
   topBadgeOffsetY: number
@@ -78,6 +80,8 @@ interface PosterSaveDeps {
   excludedBackdrops: string[]
   backdrops: TMDBImage[]
   accentColor: string | null
+  /** Auto-rilevato: se coincide con accentColor, il mapping non congela alcun override. */
+  autoAccentColor?: string | null
   logoDisabled: boolean
   setLogoDisabled: (v: boolean) => void
   setLogoScale: (v: number) => void
@@ -111,11 +115,11 @@ export function usePosterSave(deps: PosterSaveDeps) {
     globalBadges, rankingBadges, customBadge, badgeStyle, rankingBadgeStyle,
     badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings,
     defaultBadgeStyle, defaultRankingBadgeStyle,
-    blurEnabled, blurIntensity, blurFade, blurDarkness, tintStrength, gradientHeight, setGradientHeight,
+    blurEnabled, blurIntensity, blurFade, blurDarkness, tintStrength, gradientHeight, setGradientHeight, setBlurFade,
     topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale,
     genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
     networkLogoOffsetX, networkLogoOffsetY,
-    rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, logoDisabled, setLogoDisabled,
+    rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, accentColor, autoAccentColor, logoDisabled, setLogoDisabled,
     rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops,
     setLogoScale, setLogoOffsetX, setLogoOffsetY,     networkLogo, lang, episodeGroupId, posterShape,
     defaultSashOrder,
@@ -125,6 +129,7 @@ export function usePosterSave(deps: PosterSaveDeps) {
     if (!selected) return
     setPreviewPoster(image)
     setGradientHeight(defaultGradientHeightForPoster(image))
+    setBlurFade(defaultBlurFadeForPoster(image))
     setPreviewId(`${selected.media_type}:${selected.id}`)
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps -- setter refs are stable
 
@@ -322,7 +327,10 @@ export function usePosterSave(deps: PosterSaveDeps) {
           imdbId: metaInfo.imdb_id || null,
           trendRank: trendRank ?? undefined,
           trendPeriod: "day",
-          accentColor: accentColor !== '#ffffff' ? accentColor : undefined,
+          // Solo scelta manuale: l'auto-rilevato coincide con autoAccentColor e
+          // non deve congelarsi nel mapping, altrimenti il calcolo server non
+          // girerebbe più per questo titolo (né in preview né su Stremio).
+          accentColor: accentColor !== '#ffffff' && isManualAccent(accentColor, autoAccentColor) ? accentColor : undefined,
           showBadges: globalBadges,
           rankingBadges,
           // Snapshot esplicito per-titolo (freeze): valori pieni, mai
@@ -391,7 +399,7 @@ export function usePosterSave(deps: PosterSaveDeps) {
       if (!overrides.silent) import("sonner").then(({ toast }) => toast(t("ui.saveError")))
       if (overrides.silent) throw error
     }
-  }, [selected, previewPoster, selectedLogo, metaInfo, logoScale, logoOffsetX, logoOffsetY, trendRank, globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, mdblistAnimeList, loadMappings, customBadge, badgeStyle, rankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, tintStrength, gradientHeight, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops, defaultBadgeStyle, defaultRankingBadgeStyle, posters, mappingsMap, accentColor, backdropOffsetX, backdropOffsetY, backdropScale, selectedBackdrop, networkLogo, episodeGroupId, posterShape]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally complete to save all poster state
+  }, [selected, previewPoster, selectedLogo, metaInfo, logoScale, logoOffsetX, logoOffsetY, trendRank, globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, mdblistAnimeList, loadMappings, customBadge, badgeStyle, rankingBadgeStyle, blurEnabled, blurIntensity, blurFade, blurDarkness, tintStrength, gradientHeight, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, rotationPosters, autoRotateClean, defaultAutoRotateClean, excludedPosters, rotationBackdrops, autoRotateBackdrop, defaultAutoRotateBackdrop, excludedBackdrops, backdrops, defaultBadgeStyle, defaultRankingBadgeStyle, posters, mappingsMap, accentColor, autoAccentColor, backdropOffsetX, backdropOffsetY, backdropScale, selectedBackdrop, networkLogo, episodeGroupId, posterShape]) // eslint-disable-line react-hooks/exhaustive-deps -- intentionally complete to save all poster state
 
   return { selectPoster, selectLogo, removeLogo, selectBackdrop, removeBackdrop, saveConfig }
 }

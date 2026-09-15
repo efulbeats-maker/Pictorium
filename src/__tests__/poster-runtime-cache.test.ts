@@ -8,10 +8,13 @@ import {
   dynamicPosterTtlSec,
   getPendingPoster,
   isImmutablePosterRequest,
+  normalizePosterCacheParams,
   posterHeaders,
   posterNotModifiedHeaders,
+  posterResponse,
   readPosterError,
   resolveImageFormat,
+  serverTimingValue,
   variantEtagFor,
   writeCachedPoster,
   writePosterError,
@@ -80,6 +83,35 @@ describe("poster CDN headers", () => {
       isRotating: false,
       mappingVersionMatches: false,
     })).toBe(false)
+  })
+})
+
+describe("Server-Timing diagnostics (Fase 6)", () => {
+  it("formats render phases as name;dur pairs", () => {
+    expect(serverTimingValue([
+      { name: "fetch", durMs: 123.4 },
+      { name: "prep", durMs: 45 },
+      { name: "composite", durMs: 300 },
+      { name: "total", durMs: 468 },
+    ])).toBe("fetch;dur=123, prep;dur=45, composite;dur=300, total;dur=468")
+  })
+
+  it("supports desc-only entries for cache hits", () => {
+    expect(serverTimingValue([{ name: "cache", desc: "HIT" }, { name: "total", durMs: 4 }]))
+      .toBe('cache;desc="HIT", total;dur=4')
+  })
+
+  it("clamps negative durations to zero", () => {
+    expect(serverTimingValue([{ name: "prep", durMs: -3 }])).toBe("prep;dur=0")
+  })
+
+  it("posterResponse carries Server-Timing only when provided", async () => {
+    const payload = { buffer: Buffer.from([1, 2, 3]), etag: '"x"' }
+    const plain = posterResponse(payload, false)
+    expect(plain.headers.get("Server-Timing")).toBeNull()
+    const timed = posterResponse(payload, false, false, false, "jpeg", undefined, 'cache;desc="HIT", total;dur=4')
+    expect(timed.headers.get("Server-Timing")).toBe('cache;desc="HIT", total;dur=4')
+    expect(timed.headers.get("ETag")).toBe('"x"')
   })
 })
 
@@ -320,5 +352,50 @@ describe("dynamic TTL jitter (Milestone A, anti thundering-herd)", () => {
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+describe("normalizePosterCacheParams", () => {
+  it("removes version, refresh, and non-canonical parameters", () => {
+    const sp = new URLSearchParams({
+      rv: "123",
+      v: "456",
+      __poster_refresh: "1",
+      title: "Inception",
+      ac: "invalid-color",
+      tl: "foo",
+      bl: "bar",
+      bs: "non-existent-style",
+      rs: "not-a-rank-style",
+    })
+
+    const normalized = normalizePosterCacheParams(sp)
+    expect(normalized.has("rv")).toBe(false)
+    expect(normalized.has("v")).toBe(false)
+    expect(normalized.has("__poster_refresh")).toBe(false)
+    expect(normalized.has("ac")).toBe(false)
+    expect(normalized.has("tl")).toBe(false)
+    expect(normalized.has("bl")).toBe(false)
+    expect(normalized.has("bs")).toBe(false)
+    expect(normalized.has("rs")).toBe(false)
+    expect(normalized.get("title")).toBe("Inception")
+  })
+
+  it("retains valid canonical parameters", () => {
+    const sp = new URLSearchParams({
+      title: "Inception",
+      ac: "#ff0000",
+      tl: "1",
+      bl: "0",
+      bs: "pill",
+      rs: "netflix",
+    })
+
+    const normalized = normalizePosterCacheParams(sp)
+    expect(normalized.get("ac")).toBe("#ff0000")
+    expect(normalized.get("tl")).toBe("1")
+    expect(normalized.get("bl")).toBe("0")
+    expect(normalized.get("bs")).toBe("pill")
+    expect(normalized.get("rs")).toBe("netflix")
   })
 })

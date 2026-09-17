@@ -80,7 +80,7 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 | Cap display | `MAX_CUSTOM_RATINGS = 5` (i dati restano completi, la riga mostra le prime 5) |
 | Colori | convenzione ranking-badge: `topLight ? rgba(0,0,0,0.80) : rgba(255,255,255,0.80)` bg; testo `topLight ? rgba(255,255,255,0.80) : rgba(0,0,0,0.80)` |
 | Testo | `fontFamilyFor(label)` per-pill (ebraico → Rubik) + `textLength`/`lengthAdjust="spacingAndGlyphs"` come gli altri badge; `dominant-baseline="central"`, nome troncato a 80 char, `escSvg` |
-| Font embedded | `wrapSvg()` come tutti i badge (pesi 400/700/900) |
+| Font embedded | Nessun `@font-face` negli SVG: i font si risolvono dal fontdb resvg via `FONT_FILES` (`fonts.ts`: Inter 400/700/900 + Noto Symbols + Rubik 400/700/900) |
 | Fit | `w = min(maxWidth, width)` con `maxWidth = STD_W - 40`, `h` in scala proporzionale |
 | Posizione | centrata, `top = legacyTop - h - 10` sopra il badge genere (o `STD_H - 20` senza badge) — `poster-service.ts` |
 
@@ -161,7 +161,7 @@ Solo quando il provider è abilitato server-side (`PICTORIUM_CUSTOM_RATING_*`) e
 - `src/lib/context.tsx` — stato, URL builder, localStorage
 - `src/lib/poster-url.ts` — `buildPreviewUrl()`, `buildUrlPattern()` (parametri client → URL server)
 - `src/lib/badges.ts` — server-side SVG (bottomGradientSVG)
-- `src/lib/svg-badge.ts` — server-side SVG raw badges (renderGenreBadge, renderRankingBadge, renderExtraBadge) + Resvg rendering + `wrapSvg()` (font embedding, usato anche dalla riga multi-rating)
+- `src/lib/svg-badge.ts` — server-side SVG raw badges (renderGenreBadge, renderRankingBadge, renderExtraBadge) + Resvg rendering (font risolti via `FONT_FILES`, nessun embedding negli SVG; vale anche per la riga multi-rating)
 - `src/lib/multi-rating-renderer.ts` — riga pill custom rating (`renderMultiRatings`, `MAX_CUSTOM_RATINGS`)
 - `src/lib/custom-rating/` — provider server-side (`fetchCustomRatings`, `resolveCustomRatingConfig`, `formatRating`)
 - `src/lib/badge-priority.ts` — logica priorità badge (condivisa)

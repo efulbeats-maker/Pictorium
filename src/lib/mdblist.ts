@@ -2,6 +2,7 @@ import crypto from "node:crypto"
 import { cacheGet, cacheSet } from "./cache"
 import { envWithFallback } from "./env-compat"
 import { combineAbortSignals } from "./abort-signal"
+import { timedFetch } from "./outbound-stats"
 
 export interface MDBListEntry {
   imdb: string
@@ -50,9 +51,9 @@ export async function fetchMDBList(
     let res: Response | null = null
 
     if (explicitUrl) {
-      res = await fetch(`${explicitUrl}/lists/snoak/${slug}`, { signal: combineAbortSignals(signal, 8000) }).catch(() => null)
+      res = await timedFetch(`${explicitUrl}/lists/snoak/${slug}`, { signal: combineAbortSignals(signal, 8000) }).catch(() => null)
     } else if (key) {
-      res = await fetch(`https://api.mdblist.com/lists/snoak/${slug}/items?apikey=${encodeURIComponent(key)}&limit=20`, {
+      res = await timedFetch(`https://api.mdblist.com/lists/snoak/${slug}/items?apikey=${encodeURIComponent(key)}&limit=20`, {
         headers: { "User-Agent": "Mozilla/5.0 Pictorium" },
         signal: combineAbortSignals(signal, 8000),
       }).catch(() => null)
@@ -60,7 +61,7 @@ export async function fetchMDBList(
 
     if (!res || !res.ok) {
       // Fallback endpoint pubblico JSON diretto
-      res = await fetch(`https://mdblist.com/lists/snoak/${slug}/json`, {
+      res = await timedFetch(`https://mdblist.com/lists/snoak/${slug}/json`, {
         headers: { "User-Agent": "Mozilla/5.0 Pictorium" },
         signal: combineAbortSignals(signal, 8000),
       }).catch(() => null)
@@ -167,7 +168,7 @@ export async function fetchCustomMDBList(urlOrSlug: string, apiKey?: string, lim
 
     if (explicitUrl) {
       const slug = target.slug || target.id || "custom"
-      res = await fetch(`${explicitUrl}/lists/custom/${slug}`, { signal: AbortSignal.timeout(10000) }).catch(() => null)
+      res = await timedFetch(`${explicitUrl}/lists/custom/${slug}`, { signal: AbortSignal.timeout(10000) }).catch(() => null)
     } else if (key) {
       let keyUrl = ""
       if (target.id) {
@@ -178,7 +179,7 @@ export async function fetchCustomMDBList(urlOrSlug: string, apiKey?: string, lim
         keyUrl = `https://api.mdblist.com/lists/${encodeURIComponent(target.slug)}/items?apikey=${encodeURIComponent(key)}&limit=${limit}`
       }
       if (keyUrl) {
-        res = await fetch(keyUrl, {
+        res = await timedFetch(keyUrl, {
           headers: { "User-Agent": "Mozilla/5.0 Pictorium" },
           signal: AbortSignal.timeout(10000),
         }).catch(() => null)
@@ -196,7 +197,7 @@ export async function fetchCustomMDBList(urlOrSlug: string, apiKey?: string, lim
         publicUrl = `https://mdblist.com/lists/${encodeURIComponent(target.slug)}/json`
       }
       if (publicUrl) {
-        res = await fetch(publicUrl, {
+        res = await timedFetch(publicUrl, {
           headers: { "User-Agent": "Mozilla/5.0 Pictorium" },
           signal: AbortSignal.timeout(10000),
         }).catch(() => null)

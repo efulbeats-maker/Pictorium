@@ -7,6 +7,8 @@ import { createLogger } from "@/lib/logger"
 import { readJsonBody, BodyTooLargeError } from "@/lib/read-body"
 import { checkAdminToken, isSameOrigin, adminAuthResponse, originMismatchResponse } from "@/lib/auth"
 import { initSharp } from "@/lib/sharp-config"
+import { timedFetch } from "@/lib/outbound-stats"
+import { cachedImageBytes } from "@/lib/image-bytes-cache"
 
 const log = createLogger("poster-fit-api")
 
@@ -53,11 +55,15 @@ interface PosterFitResponse {
 }
 
 async function fetchImage(url: string, signal: AbortSignal): Promise<Buffer> {
-  const res = await fetch(url, { signal })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const buf = Buffer.from(await res.arrayBuffer())
-  if (buf.length < 100) throw new Error(`Image too small (${buf.length} bytes)`)
-  return buf
+  // Byte-LRU (F3): a parità di URL (logo + candidati per toggle) niente
+  // re-download; il check <100 resta dentro, invariato.
+  return cachedImageBytes(url, async () => {
+    const res = await timedFetch(url, { signal })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length < 100) throw new Error(`Image too small (${buf.length} bytes)`)
+    return buf
+  })
 }
 
 const MAX_BODY_BYTES = 50_000

@@ -54,6 +54,9 @@ function tmdbDetails(id: number) {
     backdrop_path: null,
     networks: [],
     production_companies: [],
+    // Il vero TMDB con append_to_response=external_ids include sempre gli
+    // external_ids (come il mock e2e): senza, il rescue non vedrebbe tvdb_id.
+    external_ids: { imdb_id: `tt${id}`, tvdb_id: 75710 },
   }
 }
 

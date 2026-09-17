@@ -2,6 +2,7 @@ import { createLogger } from "./logger"
 import { getJWTitleQuality } from "./justwatch"
 import { getExternalIds } from "./tmdb"
 import { envWithFallback } from "./env-compat"
+import { timedFetch } from "./outbound-stats"
 
 const log = createLogger("stream-quality")
 
@@ -71,7 +72,7 @@ export async function fetchTorrentioQuality(
         }
       }
 
-      const res = await fetch(url, {
+      const res = await timedFetch(url, {
         headers: { "User-Agent": "Pictorium/1.0" },
         signal: combinedSignal,
       })

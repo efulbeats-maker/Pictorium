@@ -26,8 +26,9 @@ pinned: false
   <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FEful97%2FPictorium"><img src="https://vercel.com/button" alt="Deploy with Vercel" /></a>
   <a href="#-docker--compose"><img src="https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js&logoColor=white" alt="Next.js 16" />
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D20-green?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D22-green?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square" alt="License AGPLv3" />
+  <a href="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml"><img src="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
 
 ---
@@ -85,7 +86,7 @@ pinned: false
 | 📺 **Ordinamento Intelligente Parti & Anime** | Rileva automaticamente i gruppi **Original Parts** (es. *La Casa di Carta*, *Lupin*) e spacchetta le mega-stagioni uniche degli anime su TMDB (es. *Re:ZERO*, *Jujutsu Kaisen*) nelle vere stagioni con cui sono distribuiti. |
 | 🏷️ **Badge Qualità & Voti** | Visualizza in tempo reale risoluzione video (4K/FHD/HD), voti aggregati da oltre 16 fonti (IMDb, TMDB, Rotten Tomatoes, Letterboxd, MAL), premi Oscar/Cannes e nastri Netflix Top 10. |
 | 🌐 **Cataloghi Personalizzati** | Importa watchlist e collezioni da **Letterboxd, Trakt, TMDb, TheTVDB, MDBList** e classifiche trend in tempo reale tramite JustWatch GraphQL. |
-| 🌍 **Interfaccia Multilingua Dinamica** | Interfaccia localizzata (Italiano, English, Français, Deutsch, Español, Português, 日本語, 한국어) con cambio lingua istantaneo in tempo reale senza ricaricare la pagina. |
+| 🌍 **Interfaccia Multilingua Dinamica** | Interfaccia localizzata (Italiano, English, Français, Deutsch, Español, Português, 日本語, 한국어, עברית, Čeština) con cambio lingua istantaneo in tempo reale senza ricaricare la pagina. Vedi [Limiti Noti](#-limiti-noti) per l'ebraico (RTL). |
 | 🔒 **Protezione con PIN & Sicurezza** | Protezione ad ogni avvio e ricaricamento (F5) per l'editor, configurabile subito nel wizard iniziale (Step 3) o nelle Impostazioni. Locandine, manifest e cataloghi per Stremio restano 100% aperti e sempre funzionanti. |
 | ⚡ **Zero Conflitti di Cache** | Versioning deterministico con `RENDER_VERSION` e `APP_VERSION` automatiche. Se cambi uno stile, Stremio aggiorna istantaneamente le immagini. |
 | 🖥️ **Poster Orizzontali 16:9 (BETA)** | Sfondi TMDB in stile Nuvio con tuning separato per formato, best-fit Cinematic Left e rotazione 24h dedicata. Vedi sotto. |
@@ -374,6 +375,11 @@ npm run verify
 ```
 
 ---
+
+## ⚠️ Limiti Noti
+
+* **Interfaccia in ebraico (RTL)**: `he` è selezionabile tra le lingue, ma il layout non applica la direzione destra→sinistra (nessun `direction: rtl`): i testi ebraici sono tradotti, l'impaginazione resta sinistra→destra. La composizione delle etichette tiene conto delle stringhe RTL (es. il numero di stagione sta *dentro* la stringa tradotta, così ogni lingua decide dove metterlo), ma la pagina non è impaginata a specchio.
+* **Versione dell'app negli artefatti container**: `APP_VERSION` è automatica e conta i commit dalla versione in `package.json`, quindi richiede la storia git. Il `Dockerfile` del repo esclude `.git` dal build context: senza il build-arg `APP_VERSION` l'immagine riporta la versione base del `package.json`. Le build CI su tag passano il build-arg e riportano la versione di rilascio.
 
 ## 📄 Licenza & Crediti
 

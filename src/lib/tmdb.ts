@@ -2,6 +2,7 @@ import { z } from "zod"
 import { createLogger } from "@/lib/logger"
 import { envWithFallback } from "@/lib/env-compat"
 import { combineAbortSignals } from "./abort-signal"
+import { timedFetch } from "./outbound-stats"
 
 const log = createLogger("tmdb")
 
@@ -317,7 +318,7 @@ async function tmdbFetch(path: string, apiKey?: string, signal?: AbortSignal, ti
     tmdbStats.lastCallTime = new Date().toISOString()
     // D5: tetto interno combinato col signal esterno (default 30s). Il path
     // poster passa 8s: un TMDB appeso non deve tenere uno slot di render.
-    const res = await fetch(fetchUrl.toString(), { signal: combineAbortSignals(signal, timeoutMs) })
+    const res = await timedFetch(fetchUrl.toString(), { signal: combineAbortSignals(signal, timeoutMs) })
     if (!res.ok) throw new Error(`TMDB fetch failed: ${res.status}`)
     const data = await res.json()
     // Evict LRU (first key = least-recently-used) when at capacity
@@ -344,7 +345,7 @@ export async function checkTmdbEndpoint(path: string, apiKey?: string): Promise<
   try {
     const url = new URL(`${TMDB_BASE}${path}`)
     url.searchParams.set("api_key", key)
-    const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) })
+    const res = await timedFetch(url.toString(), { signal: AbortSignal.timeout(8000) })
     return { ok: res.ok, status: res.status, time: Math.round(performance.now() - start) }
   } catch {
     return { ok: false, status: 0, time: Math.round(performance.now() - start) }
@@ -561,6 +562,9 @@ export interface TMDBDetails {
   }
   external_ids?: {
     imdb_id?: string | null
+    // Stesso shape di tmdbExternalIdsSchema: lo schema details è passthrough,
+    // quindi tvdb_id arriva già a runtime — qui solo il tipo lo ammette.
+    tvdb_id?: number | null
   }
 }
 

@@ -9,6 +9,8 @@ import { isBreakerOpen as isAwardsBreakerOpen } from "@/lib/awards"
 import { isMdblistBreakerOpen } from "@/lib/ratings"
 import { isJustwatchBreakerOpen } from "@/lib/justwatch"
 import { isTvdbBreakerOpen } from "@/lib/tvdb"
+import { outboundStats } from "@/lib/outbound-stats"
+import { imageBytesStats } from "@/lib/image-bytes-cache"
 
 export async function GET(req: NextRequest) {
   const rl = await rateLimit(rateLimitKey(req), "default")
@@ -41,6 +43,8 @@ export async function GET(req: NextRequest) {
     posterErrors: posterErrorStats(),
     poster: getPosterStats(),
     tmdb: getTMDBStats(),
+    outbound: outboundStats(),
+    imageBytes: imageBytesStats(),
     system: systemStats,
     circuitBreakers: {
       awards: isAwardsBreakerOpen(),

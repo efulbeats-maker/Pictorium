@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import sharp from "sharp"
 import { NextRequest } from "next/server"
 import { POST } from "@/app/api/poster-fit/route"
+import { __resetImageBytesForTest } from "@/lib/image-bytes-cache"
 
 async function makePosterBuffer(r: number, g: number, b: number): Promise<Buffer> {
   const data = Buffer.alloc(500 * 750 * 3)
@@ -30,6 +31,13 @@ function mockNextRequest(body: unknown): NextRequest {
 }
 
 describe("POST /api/poster-fit", () => {
+  beforeEach(() => {
+    // La byte-cache è globale al processo: senza reset, un test che riusa gli
+    // stessi path non toccherebbe la fetch stubbata e le asserzioni sugli URL
+    // fallirebbero (stesso pattern di cacheClear negli altri file).
+    __resetImageBytesForTest()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })

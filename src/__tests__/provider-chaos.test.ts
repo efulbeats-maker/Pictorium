@@ -103,6 +103,9 @@ function tmdbDetails(id: number) {
     backdrop_path: null,
     networks: [],
     production_companies: [],
+    // F5a: il path poster usa details+external_ids in un colpo solo — il vero
+    // TMDB con append_to_response li include sempre (come il mock e2e).
+    external_ids: { imdb_id: `tt${id}`, tvdb_id: null },
   }
 }
 

@@ -1,6 +1,28 @@
 # Changelog
 
-## [Unreleased]
+> **Fonte di verità delle release: [GitHub Releases](https://github.com/Eful97/Pictorium/releases).**
+> Da `1.21.0` le note di rilascio (generate dai commit convenzionali) vivono lì; questo file resta
+> come indice storico e non viene più aggiornato ad ogni release.
+> Le sezioni storiche non coprono le versioni `1.0.11`–`1.20.x`, che non sono mai state documentate qui.
+
+## [1.21.0] - 2026-09-16
+
+Prima release taggata del progetto. Note di rilascio complete: [v1.21.0](https://github.com/Eful97/Pictorium/releases/tag/v1.21.0).
+
+### Added
+- **Override esplicito di `APP_VERSION`** (`APP_VERSION=x.y.z`) in `scripts/write-app-version.mjs`, passato dalle build CI come build-arg dal tag: gli artefatti container riportano la versione reale invece della sola base del `package.json` (il build context esclude `.git`, quindi il conteggio commit non è disponibile).
+
+### Changed
+- **Documentazione allineata alla realtà**: badge Node.js `>=22` (era `>=20`), 10 lingue UI dichiarate (`he` e `cs` incluse), `audit.yml` su Node 22, `AGENTS.md` senza valori di versione hardcoded.
+- **Nuova sezione "Limiti Noti"** in entrambi i README (ebraico RTL, versione negli artefatti container).
+- **Badge CI** nei README (stato dei workflow, dinamico).
+
+### Documentation
+- GitHub Releases è ora la fonte di verità delle release; questo changelog resta come indice storico.
+
+## [Storico pre-1.21.0]
+
+Sezioni accumulate senza rilascio corrispondente: restano come scritte all'epoca.
 
 ### Added
 - **Progressive bottom blur** (`src/lib/blur.ts`): dual-sigma a intensità crescente, bleed anti-seam 16px, alpha smoothstep, shade quadratico e tinta di scena same-hue (`findSceneTint`) con intensità regolabile (`tintStrength` 0-100, default 20: per-titolo, config token, default globale, env `PICTORIUM_TINT_STRENGTH`, slider editor)

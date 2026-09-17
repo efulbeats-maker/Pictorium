@@ -48,6 +48,14 @@ describe("GET /api/cache/status", () => {
         uptimeSeconds: expect.any(Number),
       }),
       circuitBreakers: expect.any(Object),
+      outbound: expect.any(Object),
+      imageBytes: expect.objectContaining({
+        enabled: expect.any(Boolean),
+        hits: expect.any(Number),
+        misses: expect.any(Number),
+        entries: expect.any(Number),
+        bytes: expect.any(Number),
+      }),
     })
   })
 
@@ -80,6 +88,8 @@ describe("GET /api/cache/status", () => {
       tmdb: expect.any(Object),
       system: expect.any(Object),
       circuitBreakers: expect.any(Object),
+      outbound: expect.any(Object),
+      imageBytes: expect.any(Object),
     })
   })
 })

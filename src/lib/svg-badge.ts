@@ -1,6 +1,5 @@
-import fs from "fs"
 import { textColorForBg } from "./accent-color"
-import { FONT_FILES, FONT_INTER_REGULAR, FONT_INTER_BOLD, FONT_INTER_BLACK, FONT_SYMBOLS } from "./fonts"
+import { FONT_FILES } from "./fonts"
 import { estimateTextWidth, fontFamilyFor, genreBadgeSafePad, genreBadgeSvgDims, genrePillMaxW, BADGE_BOX_PAD_X_FACTOR, buildGenreBarSvg, buildGenrePillSvg, buildGenreTextSvg, buildGenreBorderedSvg, buildGenreGlassSvg, buildRankingBarSvg, buildRankingDefaultSvg, buildRankingPillSvg, buildRankingGlassSvg, buildRankingBorderedSvg, buildExtraBarSvg, buildExtraDefaultSvg, buildExtraPillSvg, buildExtraGlassSvg, buildExtraBorderedSvg, buildQualityBadgeSvg, escSvg, satinPillStops } from "./badge-svg-shared"
 import type { GenreParts } from "./badge-svg-shared"
 import type { BadgeStyle, RankingBadgeStyle, ExtraBadgeStyle } from "./badge-styles"
@@ -15,79 +14,10 @@ import type { BadgeStyle, RankingBadgeStyle, ExtraBadgeStyle } from "./badge-sty
 const TRANSLUCENT_BADGE_TEXT = "#e5e7eb"
 
 
-let _regular: Buffer | null = null
-let _bold: Buffer | null = null
-let _black: Buffer | null = null
-let _symbols: Buffer | null = null
-let _b64Regular: string | null = null
-let _b64Bold: string | null = null
-let _b64Black: string | null = null
-let _b64Symbols: string | null = null
-let _fontsWarmed = false
-
-export function warmFonts(): void {
-  if (_fontsWarmed) return
-  try {
-    fontRegular(); fontBold(); fontBlack(); fontSymbols()
-    fontStyle()
-    _fontsWarmed = true
-  } catch (e) {
-    console.warn("[pictorium] Font warming failed:", e instanceof Error ? e.message : String(e))
-  }
-}
-
-function fontRegular(): Buffer {
-  if (!_regular) _regular = fs.readFileSync(FONT_INTER_REGULAR)
-  return _regular
-}
-function fontBold(): Buffer {
-  if (!_bold) _bold = fs.readFileSync(FONT_INTER_BOLD)
-  return _bold
-}
-function fontBlack(): Buffer {
-  if (!_black) _black = fs.readFileSync(FONT_INTER_BLACK)
-  return _black
-}
-function fontSymbols(): Buffer {
-  if (!_symbols) _symbols = fs.readFileSync(FONT_SYMBOLS)
-  return _symbols
-}
-
-function b64Regular(): string {
-  if (!_b64Regular) _b64Regular = fontRegular().toString("base64")
-  return _b64Regular
-}
-function b64Bold(): string {
-  if (!_b64Bold) _b64Bold = fontBold().toString("base64")
-  return _b64Bold
-}
-function b64Black(): string {
-  if (!_b64Black) _b64Black = fontBlack().toString("base64")
-  return _b64Black
-}
-function b64Symbols(): string {
-  if (!_b64Symbols) _b64Symbols = fontSymbols().toString("base64")
-  return _b64Symbols
-}
-
-let _cachedStyle: string | null = null
-function fontStyle(): string {
-  if (!_cachedStyle) {
-    _cachedStyle = `<style>@font-face{font-family:'Inter';src:url(data:font/ttf;base64,${b64Regular()});font-weight:400;font-style:normal}@font-face{font-family:'Inter';src:url(data:font/ttf;base64,${b64Bold()});font-weight:700;font-style:normal}@font-face{font-family:'Inter';src:url(data:font/ttf;base64,${b64Black()});font-weight:900;font-style:normal}@font-face{font-family:'Noto Sans Symbols 2';src:url(data:font/ttf;base64,${b64Symbols()});font-weight:400;font-style:normal}</style>`
-  }
-  return _cachedStyle
-}
-
-export function wrapSvg(svg: string): string {
-  if (svg.includes("</defs>")) {
-    return svg.replace("</defs>", `${fontStyle()}</defs>`)
-  }
-  // SVG senza <defs> (es. Netflix badge): inserisci font-style prima di </svg>
-  if (svg.includes("</svg>")) {
-    return svg.replace("</svg>", `${fontStyle()}</svg>`)
-  }
-  return svg.replace(/<svg /, `<svg >${fontStyle()}`)
-}
+// NOTE: i badge risolvono i font via `fontFiles: [...FONT_FILES]` in
+// renderSVG (fontdb resvg). L'embedding @font-face base64 in ogni SVG
+// (wrapSvg) è stato rimosso: resvg non applica i data URI e l'output è
+// byte-identico senza (Gate A SHA-256, Fase 1).
 
 // D2: il dynamic import di resvg (init WASM) veniva rieseguito a OGNI badge —
 // un poster con ~5 badge pagava 5 init. Hoist del promise a module level: il
@@ -168,7 +98,7 @@ export async function buildExtraBadgeSVG(
   } else {
     result = buildExtraDefaultSvg(label, fs, fg, bg, detached)
   }
-  const png = await renderSVG(wrapSvg(result.svg), result.w)
+  const png = await renderSVG(result.svg, result.w)
   return { png, w: result.w, h: result.h }
 }
 
@@ -258,7 +188,7 @@ export async function buildGenreBadgeSVG(
       attempts++
     }
   }
-  const png = await renderSVG(wrapSvg(result.svg), result.w)
+  const png = await renderSVG(result.svg, result.w)
   return { png, w: result.w, h: result.h }
 }
 
@@ -421,7 +351,7 @@ export async function buildRankingBadgeSVG(
     // colored: passa la tinta accent come flatBg (resta piatta); default: gradiente.
     result = buildRankingDefaultSvg(fullText, fs, fg, bg, !!topLight, isColored ? bg : undefined, detached)
   }
-  const png = await renderSVG(wrapSvg(result.svg), result.w)
+  const png = await renderSVG(result.svg, result.w)
   return { png, w: result.w, h: result.h }
 }
 
@@ -509,7 +439,7 @@ export async function renderComingSoonRibbon(
     `<rect x="${-half}" y="${Math.round(-bandH / 2)}" width="${half * 2}" height="${bandH}" fill="url(#csGrad)"/>` +
     `<text x="0" y="${Math.round(1 * s)}" text-anchor="middle" dominant-baseline="central" font-family="${fontFamilyFor(text)}" font-weight="800" font-size="${fs}" fill="#ffffff" letter-spacing="0.05em">${escSvg(text)}</text>` +
     `</g></svg>`
-  const png = await renderSVG(wrapSvg(svg), CS)
+  const png = await renderSVG(svg, CS)
   return { png, w: CS, h: CS }
 }
 
@@ -523,7 +453,7 @@ export async function renderQualityBadge(
   const bg = topLight ? "rgba(0,0,0,0.80)" : "rgba(255,255,255,0.80)"
   const fg = topLight ? "rgba(255,255,255,0.80)" : "rgba(0,0,0,0.80)"
   const result = buildQualityBadgeSvg(quality, fs, fg, bg, !!topLight)
-  const png = await renderSVG(wrapSvg(result.svg), result.w)
+  const png = await renderSVG(result.svg, result.w)
   return { png, w: result.w, h: result.h }
 }
 

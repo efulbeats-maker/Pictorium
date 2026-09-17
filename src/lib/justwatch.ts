@@ -1,5 +1,6 @@
 import { hasDigitalOffer } from "./pre-release"
 import { combineAbortSignals } from "./abort-signal"
+import { timedFetch } from "./outbound-stats"
 import { envWithFallback } from "@/lib/env-compat"
 import { createCircuitBreaker } from "@/lib/circuit-breaker"
 
@@ -309,7 +310,7 @@ export async function getJWRankings(
 
   let res: Response
   try {
-    res = await fetch(JW_API, {
+    res = await timedFetch(JW_API, {
       method: "POST",
       headers: jwHeaders(),
       signal: combineAbortSignals(signal, JW_TIMEOUT_MS),
@@ -448,7 +449,7 @@ export async function getJWTitles(opts: JWTitleOptions): Promise<JWRankEntry[]> 
 
   let res: Response
   try {
-    res = await fetch(JW_API, {
+    res = await timedFetch(JW_API, {
       method: "POST",
       headers: jwHeaders(),
       signal: AbortSignal.timeout(JW_TIMEOUT_MS),
@@ -565,85 +566,105 @@ export async function getJWTitleQuality(
     return null
   }
 
-  try {
-    const filter: Record<string, unknown> = {
-      objectTypes: [objectType],
-    }
-    if (searchTitle) {
-      filter.searchQuery = searchTitle
-    }
+  const filter: Record<string, unknown> = {
+    objectTypes: [objectType],
+  }
+  if (searchTitle) {
+    filter.searchQuery = searchTitle
+  }
 
-    const timeoutSignal = AbortSignal.timeout(JW_TIMEOUT_MS)
-    let combinedSignal: AbortSignal = timeoutSignal
-    if (signal) {
-      if (typeof (AbortSignal as unknown as { any?: unknown }).any === "function") {
-        combinedSignal = (AbortSignal as unknown as { any: (signals: AbortSignal[]) => AbortSignal }).any([signal, timeoutSignal])
-      } else {
-        const ctrl = new AbortController()
-        const onAbort = () => ctrl.abort((signal as unknown as { reason?: unknown })?.reason ?? timeoutSignal.reason)
-        if (signal.aborted || timeoutSignal.aborted) ctrl.abort()
-        else {
-          signal.addEventListener("abort", onAbort, { once: true })
-          timeoutSignal.addEventListener("abort", onAbort, { once: true })
-        }
-        combinedSignal = ctrl.signal
-      }
-    }
-
-    const res = await fetch(JW_API, {
-      method: "POST",
-      headers: jwHeaders(),
-      signal: combinedSignal,
-      body: JSON.stringify({
-        operationName: "GetTitleOffers",
-        query: TITLE_OFFERS_QUERY,
-        variables: {
-          country,
-          language,
-          filter,
-        },
-      }),
-    })
-    captureCookie(res.headers)
-    if (!res.ok) {
-      recordCircuitFailure(res.status)
-      return null
-    }
-    const json = await res.json()
-    if (json.errors && !usablePayload(json.data)) {
-      recordCircuitFailure()
-      return null
-    }
-    recordCircuitSuccess()
-
-    const edges = json?.data?.popularTitles?.edges || []
+  const payload = await fetchTitleOffersShared(country, language, filter, signal)
+  if (!payload) return null
+  {
+    const edges = payload.edges
 
     let matchedNode = null
     for (const e of edges) {
-      const edgeTmdbId = Number(e?.node?.content?.externalIds?.tmdbId)
+      const edge = e as { node?: { content?: { externalIds?: { tmdbId?: unknown } } } }
+      const edgeTmdbId = Number(edge?.node?.content?.externalIds?.tmdbId)
       if (edgeTmdbId === tmdbId) {
-        matchedNode = e.node
+        matchedNode = (edge as { node?: unknown }).node
         break
       }
     }
     if (!matchedNode && searchTitle && edges.length > 0) {
-      matchedNode = edges[0].node
+      matchedNode = (edges[0] as { node?: unknown }).node
     }
 
-    const offers = (matchedNode?.offers || []) as Array<{ presentationType?: string }>
+    const node = matchedNode as { offers?: Array<{ presentationType?: string }> } | null
+    const offers = (node?.offers || []) as Array<{ presentationType?: string }>
     const presTypes = offers.map((o) => o.presentationType)
     const maxQ = resolveMaxQuality(presTypes)
 
     if (qualityCache.size >= CACHE_MAX) qualityCache.delete(qualityCache.keys().next().value!)
     qualityCache.set(cacheKey, { data: maxQ, timestamp: Date.now() })
     return maxQ
-  } catch {
-    recordCircuitFailure()
-    return null
   }
 }
 
 const availabilityCache = new Map<string, { data: boolean | null; timestamp: number }>()
+
+interface TitleOffersPayload {
+  readonly edges: Array<unknown>
+}
+
+// Dedup in-flight delle POST GetTitleOffers identiche (quality + availability
+// sullo stesso titolo): una sola rete, N waiter. Stesso pattern di tmdb.ts —
+// signal/timeout valgono per la PRIMA richiesta (quella che esegue il fetch);
+// gli altri ricevono lo stesso esito, fail-open a null come oggi su errore.
+// Le due cache per-risultato (quality/availability) e i parser restano
+// invariati: cambia solo il trasporto condiviso, mai la semantica.
+const titleOffersInflight = new Map<string, Promise<TitleOffersPayload | null>>()
+
+async function fetchTitleOffersShared(
+  country: string,
+  language: string,
+  filter: Record<string, unknown>,
+  signal?: AbortSignal,
+): Promise<TitleOffersPayload | null> {
+  const key = `${country}|${language}|${JSON.stringify(filter)}`
+  const existing = titleOffersInflight.get(key)
+  if (existing) return existing
+  const promise: Promise<TitleOffersPayload | null> = (async (): Promise<TitleOffersPayload | null> => {
+    try {
+      const res = await timedFetch(JW_API, {
+        method: "POST",
+        headers: jwHeaders(),
+        signal: combineAbortSignals(signal, JW_TIMEOUT_MS),
+        body: JSON.stringify({
+          operationName: "GetTitleOffers",
+          query: TITLE_OFFERS_QUERY,
+          variables: {
+            country,
+            language,
+            filter,
+          },
+        }),
+      })
+      captureCookie(res.headers)
+      if (!res.ok) {
+        recordCircuitFailure(res.status)
+        return null
+      }
+      const json = await res.json()
+      if (json.errors && !usablePayload(json.data)) {
+        recordCircuitFailure()
+        return null
+      }
+      recordCircuitSuccess()
+      return { edges: json?.data?.popularTitles?.edges || [] }
+    } catch {
+      recordCircuitFailure()
+      return null
+    } finally {
+      // Stesso pattern di tmdb.ts: delete per chiave al settle. Nessuna race:
+      // il finally gira prima di qualsiasi waiter successivo (ordine microtask).
+      titleOffersInflight.delete(key)
+    }
+  })()
+  titleOffersInflight.set(key, promise)
+  return promise
+}
 
 /**
  * True se il titolo ha almeno un'offerta streaming/digitale (noleggio,
@@ -670,64 +691,24 @@ export async function hasJWOffers(
     return null
   }
 
-  try {
-    const filter: Record<string, unknown> = {
-      objectTypes: [objectType],
-    }
-    if (searchTitle) {
-      filter.searchQuery = searchTitle
-    }
+  const filter: Record<string, unknown> = {
+    objectTypes: [objectType],
+  }
+  if (searchTitle) {
+    filter.searchQuery = searchTitle
+  }
 
-    const timeoutSignal = AbortSignal.timeout(JW_TIMEOUT_MS)
-    let combinedSignal: AbortSignal = timeoutSignal
-    if (signal) {
-      if (typeof (AbortSignal as unknown as { any?: unknown }).any === "function") {
-        combinedSignal = (AbortSignal as unknown as { any: (signals: AbortSignal[]) => AbortSignal }).any([signal, timeoutSignal])
-      } else {
-        const ctrl = new AbortController()
-        const onAbort = () => ctrl.abort((signal as unknown as { reason?: unknown })?.reason ?? timeoutSignal.reason)
-        if (signal.aborted || timeoutSignal.aborted) ctrl.abort()
-        else {
-          signal.addEventListener("abort", onAbort, { once: true })
-          timeoutSignal.addEventListener("abort", onAbort, { once: true })
-        }
-        combinedSignal = ctrl.signal
-      }
-    }
+  const payload = await fetchTitleOffersShared(country, language, filter, signal)
+  if (!payload) return null
+  {
+    const edges = payload.edges
 
-    const res = await fetch(JW_API, {
-      method: "POST",
-      headers: jwHeaders(),
-      signal: combinedSignal,
-      body: JSON.stringify({
-        operationName: "GetTitleOffers",
-        query: TITLE_OFFERS_QUERY,
-        variables: {
-          country,
-          language,
-          filter,
-        },
-      }),
-    })
-    captureCookie(res.headers)
-    if (!res.ok) {
-      recordCircuitFailure(res.status)
-      return null
-    }
-    const json = await res.json()
-    if (json.errors && !usablePayload(json.data)) {
-      recordCircuitFailure()
-      return null
-    }
-    recordCircuitSuccess()
-
-    const edges = json?.data?.popularTitles?.edges || []
-
-    let matchedNode = null
+    let matchedNode: unknown = null
     for (const e of edges) {
-      const edgeTmdbId = Number(e?.node?.content?.externalIds?.tmdbId)
+      const edge = e as { node?: { content?: { externalIds?: { tmdbId?: unknown } } } }
+      const edgeTmdbId = Number(edge?.node?.content?.externalIds?.tmdbId)
       if (edgeTmdbId === tmdbId) {
-        matchedNode = e.node
+        matchedNode = edge.node
         break
       }
     }
@@ -735,7 +716,8 @@ export async function hasJWOffers(
     // (un miss non è una prova di assenza).
     if (!matchedNode) return null
 
-    const offers = (matchedNode?.offers || []) as Array<{ presentationType?: string; monetizationType?: string | null }>
+    const node = matchedNode as { offers?: Array<{ presentationType?: string; monetizationType?: string | null }> }
+    const offers = (node?.offers || []) as Array<{ presentationType?: string; monetizationType?: string | null }>
     // Solo offerte digitali: CINEMA (biglietti) non è disponibilità
     // digitale/streaming (vedi hasDigitalOffer in pre-release.ts).
     const available = hasDigitalOffer(offers)
@@ -743,9 +725,6 @@ export async function hasJWOffers(
     if (availabilityCache.size >= CACHE_MAX) availabilityCache.delete(availabilityCache.keys().next().value!)
     availabilityCache.set(cacheKey, { data: available, timestamp: Date.now() })
     return available
-  } catch {
-    recordCircuitFailure()
-    return null
   }
 }
 
@@ -754,6 +733,7 @@ export function __resetJWRankingsCache(): void {
   rankingsCache.clear()
   qualityCache.clear()
   availabilityCache.clear()
+  titleOffersInflight.clear()
   ddCookie = null
   justwatchBreaker.reset()
 }

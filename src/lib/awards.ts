@@ -1,5 +1,6 @@
 import { cacheGetShared, cacheSet } from "./cache"
 import { combineAbortSignals } from "./abort-signal"
+import { timedFetch } from "./outbound-stats"
 import { createCircuitBreaker } from "@/lib/circuit-breaker"
 
 interface AwardRule {
@@ -100,7 +101,7 @@ async function sparqlQuery(query: string, signal?: AbortSignal): Promise<Record<
     for (let attempt = 0; attempt < 2; attempt++) {
       const timeout = 5000 + Math.round(Math.random() * 1000)
       try {
-        const res = await fetch(url, {
+        const res = await timedFetch(url, {
           headers: { "User-Agent": "Pictorium/1.0" },
           signal: combineAbortSignals(signal, timeout),
         })
@@ -236,7 +237,7 @@ function qidFromEntityUri(value: string | null | undefined): string | null {
 async function enwikiTitle(qid: string, signal?: AbortSignal): Promise<string | null> {
   try {
     const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=sitelinks&sitefilter=enwiki&format=json`
-    const res = await fetch(url, {
+    const res = await timedFetch(url, {
       headers: { "User-Agent": "Pictorium/1.0" },
       signal: combineAbortSignals(signal, 4000),
     })
@@ -276,6 +277,34 @@ export function directorBadgeLabel(name: string | null, t?: (key: string, params
 
 const WIKIDATA_CACHE_TTL = 24 * 60 * 60 * 1000
 
+// Negative cache in-memory per i fallimenti transitori (breaker, timeout,
+// 5xx): senza, un outage SPARQL fa pagare la race da 2500ms a OGNI render.
+// Solo memoria locale (mai KV: durante un outage il KV è l'ultima cosa da
+// stressare), TTL 60s: al recovery i premi ricompaiono entro un minuto.
+const WIKIDATA_NEGATIVE_TTL_MS = 60_000
+const wikidataNegative = new Map<string, number>()
+const WIKIDATA_NEGATIVE_MAX = 500
+
+function wikidataNegativeHit(cacheKey: string): boolean {
+  const at = wikidataNegative.get(cacheKey)
+  if (at === undefined) return false
+  if (Date.now() - at > WIKIDATA_NEGATIVE_TTL_MS) {
+    wikidataNegative.delete(cacheKey)
+    return false
+  }
+  return true
+}
+
+function wikidataNegativeSet(cacheKey: string): void {
+  if (wikidataNegative.size >= WIKIDATA_NEGATIVE_MAX) wikidataNegative.delete(wikidataNegative.keys().next().value!)
+  wikidataNegative.set(cacheKey, Date.now())
+}
+
+/** Solo per i test: svuota la negative cache. */
+export function __resetWikidataNegativeForTest(): void {
+  wikidataNegative.clear()
+}
+
 export async function fetchAllWikidata(
   tmdbId: number,
   mediaType: "movie" | "tv",
@@ -290,6 +319,9 @@ export async function fetchAllWikidata(
   // ritirava i dadi SPARQL per conto suo → lotteria badge multi-istanza).
   const cached = await cacheGetShared<WikidataResult>(cacheKey, ["wikidata"])
   if (cached) return cached
+  if (wikidataNegativeHit(cacheKey)) {
+    return { awards: [], nominations: [], studios: [], director: null }
+  }
 
   const tmdbProp = mediaType === "movie" ? "P4947" : "P4983"
   const networkQuery = mediaType === "tv" ? `OPTIONAL { ?item wdt:P449 ?network . ?network rdfs:label ?networkLabel . FILTER(LANG(?networkLabel) = "en") }` : ""
@@ -305,7 +337,11 @@ export async function fetchAllWikidata(
   try {
     const bindings = await sparqlQuery(query, signal)
     if (bindings === null) {
-      // Fallimento transitorio (breaker, timeout, 5xx): non inquinare la cache 24h
+      // Fallimento transitorio (breaker, timeout, 5xx): non inquinare la cache 24h,
+      // ma registra la negativa breve così l'outage non tassa ogni render.
+      // Mai a breaker già aperto: lì sopprime già lui (stesso TTL), e la
+      // negativa non deve nascondere i fallimenti che il breaker deve contare.
+      if (!isBreakerOpen()) wikidataNegativeSet(cacheKey)
       return { awards: [], nominations: [], studios: [], director: null }
     }
 

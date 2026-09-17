@@ -1,5 +1,6 @@
 import crypto from "node:crypto"
 import { cacheGet, cacheSet } from "./cache"
+import { timedFetch } from "./outbound-stats"
 import { createLogger } from "@/lib/logger"
 import { envWithFallback } from "@/lib/env-compat"
 import { createCircuitBreaker, parseRetryAfterMs } from "@/lib/circuit-breaker"
@@ -26,6 +27,20 @@ const mdblistBreaker = createCircuitBreaker({ name: "mdblist", failureThreshold:
 /** Solo per i test: azzera lo stato del breaker MDBList. */
 export function __resetMdblistBreaker(): void {
   mdblistBreaker.reset()
+}
+
+const RATINGS_NULL_TTL_MS = 60_000
+const RATINGS_NULL_MAX = 500
+const ratingsNullAt = new Map<string, number>()
+
+function ratingsNullSet(cacheKey: string): void {
+  if (ratingsNullAt.size >= RATINGS_NULL_MAX) ratingsNullAt.delete(ratingsNullAt.keys().next().value!)
+  ratingsNullAt.set(cacheKey, Date.now())
+}
+
+/** Solo per i test: svuota la negative cache dei null. */
+export function __resetRatingsNullForTest(): void {
+  ratingsNullAt.clear()
 }
 
 export function isMdblistBreakerOpen(): boolean {
@@ -130,6 +145,14 @@ export async function fetchAggregatedRating(
   const cacheKey = `mdb:ratings:${imdbId}:${keyHash}`
   const cached = cacheGet<AggregatedRatings>(cacheKey)
   if (cached) return cached
+  // Null/miss non cachabili nel KV tipizzato (null = miss): negativa breve
+  // in-memory così un titolo senza rating non rifà rete a ogni render.
+  // Stesso pattern di wikidata: solo memoria, mai KV, TTL 60s.
+  const nulledAt = ratingsNullAt.get(cacheKey)
+  if (nulledAt !== undefined) {
+    if (Date.now() - nulledAt < RATINGS_NULL_TTL_MS) return null
+    ratingsNullAt.delete(cacheKey)
+  }
 
   // Breaker aperto → fail-open immediato: niente rete, i caller usano il voto TMDB.
   if (mdblistBreaker.isOpen()) return null
@@ -153,19 +176,24 @@ export async function fetchAggregatedRating(
         combined = ctrl.signal
       }
     }
-    const res = await fetch(
+    const res = await timedFetch(
       `${MDBLIST}/${qs}`,
       { signal: combined }
     )
     if (res.status === 429 || res.status >= 500) {
       // Rate limit o server error (500, 502, 503): la finestra segue
       // l'eventuale Retry-After upstream, oppure il default 30s.
+      // Niente negativa qui: i fallimenti appartengono al breaker (che deve
+      // contarli per aprirsi), la negativa copre solo i miss genuini.
       mdblistBreaker.recordFailure(parseRetryAfterMs((n) => res.headers.get(n)))
       return null
     }
     // Altri non-OK (404 miss genuina, 401 chiave invalida): fail veloce
     // senza far scattare il breaker per tutti i film.
-    if (!res.ok) return null
+    if (!res.ok) {
+      ratingsNullSet(cacheKey)
+      return null
+    }
     mdblistBreaker.recordSuccess()
     {
       const raw = await res.json()
@@ -233,10 +261,14 @@ export async function fetchAggregatedRating(
   } catch (e) {
     // Cancellazione nostra (deadline render, race persa) ≠ fallimento
     // upstream: non deve far scattare il breaker. Timeout interno e errori
-    // di rete invece sì.
+    // di rete invece sì. Mai in negativa: abort e transienti appartengono a
+    // race/breaker, non alla cache dei miss.
     if (!signal?.aborted) mdblistBreaker.recordFailure()
     log.error("MDBList fetch failed", { error: e instanceof Error ? e.message : String(e) })
+    return null
   }
 
+  // Solo i miss genuini (404/401 o payload senza rating) arrivano qui.
+  ratingsNullSet(cacheKey)
   return null
 }

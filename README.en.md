@@ -26,8 +26,9 @@ pinned: false
   <a href="https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FEful97%2FPictorium"><img src="https://vercel.com/button" alt="Deploy with Vercel" /></a>
   <a href="#-docker--compose"><img src="https://img.shields.io/badge/Docker-Supported-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker" /></a>
   <img src="https://img.shields.io/badge/Next.js-16-black?style=flat-square&logo=next.js&logoColor=white" alt="Next.js 16" />
-  <img src="https://img.shields.io/badge/Node.js-%3E%3D20-green?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
+  <img src="https://img.shields.io/badge/Node.js-%3E%3D22-green?style=flat-square&logo=node.js&logoColor=white" alt="Node.js" />
   <img src="https://img.shields.io/badge/License-AGPL--3.0-blue?style=flat-square" alt="License AGPLv3" />
+  <a href="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml"><img src="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
 
 ---
@@ -85,7 +86,7 @@ pinned: false
 | 📺 **Smart Parts & Anime Splitting** | Automatically detects **Original Parts** (e.g. *Money Heist*, *Lupin*) and splits giant single-season anime entries on TMDB (e.g. *Re:ZERO*, *Jujutsu Kaisen*) into their true release seasons. |
 | 🏷️ **Quality Badges & Ratings** | Real-time video resolution detection (4K/FHD/HD), aggregated ratings from over 16 sources (IMDb, TMDB, Rotten Tomatoes, Letterboxd, MAL), Academy/Cannes awards, and Netflix Top 10 ribbons. |
 | 🌐 **Custom Catalogs** | Import watchlists and custom lists from **Letterboxd, Trakt, TMDb, TheTVDB, MDBList**, along with real-time trending charts via JustWatch GraphQL. |
-| 🌍 **Dynamic Multilingual UI** | Fully localized interface (Italian, English, French, German, Spanish, Portuguese, Japanese, Korean) with instant real-time language switching without page refresh. |
+| 🌍 **Dynamic Multilingual UI** | Fully localized interface (Italian, English, French, German, Spanish, Portuguese, Japanese, Korean, Hebrew, Czech) with instant real-time language switching without page refresh. See [Known Limitations](#-known-limitations) for Hebrew (RTL). |
 | 🔒 **PIN Protection & Security** | Lock screen protection on every launch and page reload (F5) for the editor, configurable right during the initial setup wizard (Step 3) or in Settings. Stremio manifests and posters remain 100% open and unaffected. |
 | ⚡ **Zero Cache Conflicts** | Deterministic versioning with automated `RENDER_VERSION` and `APP_VERSION`. Change any styling parameter and Stremio updates cached images immediately. |
 | 🖥️ **16:9 Landscape Posters (BETA)** | Nuvio-style TMDB backdrops with per-format tuning, Cinematic Left best-fit and dedicated 24h rotation. See below. |
@@ -372,6 +373,11 @@ npm run verify
 ```
 
 ---
+
+## ⚠️ Known Limitations
+
+* **Hebrew UI (RTL)**: `he` is selectable among languages, but the layout does not apply right-to-left direction (no `direction: rtl`): Hebrew strings are translated, the page layout stays LTR. Label composition is RTL-aware (e.g. the season number lives *inside* the translated string so each language decides where to place it), but the page itself is not mirrored.
+* **App version in container artifacts**: `APP_VERSION` is automatic and counts commits since the version set in `package.json`, so it requires git history. The repo `Dockerfile` excludes `.git` from the build context: without the `APP_VERSION` build-arg the image reports the base version from `package.json`. CI builds on tags pass the build-arg and report the release version.
 
 ## 📄 License & Credits
 

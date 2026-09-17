@@ -3,6 +3,8 @@ import sharp from "sharp"
 import { findAccentColor, findSceneTint } from "@/lib/accent-color"
 import { GENRE_FALLBACK } from "@/lib/badges"
 import { ARTWORKS_BASE } from "@/lib/tvdb"
+import { cachedImageBytes } from "@/lib/image-bytes-cache"
+import { timedFetch } from "@/lib/outbound-stats"
 // Batch B: STD_W/STD_H ora provengono da image-utils.ts (single source of truth)
 import { STD_W, STD_H, computeRegionStats } from "@/lib/image-utils"
 
@@ -44,13 +46,17 @@ export async function fetchImg(url: string, signal?: AbortSignal): Promise<Buffe
       combined = ctrl.signal
     }
   }
-  const res = await fetch(url, { signal: combined })
-  if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
-  const cl = res.headers.get("content-length")
-  if (cl && Number(cl) > MAX_IMG_SIZE) throw new Error("image too large")
-  const buf = Buffer.from(await res.arrayBuffer())
-  if (buf.length > MAX_IMG_SIZE) throw new Error("image too large")
-  return buf
+  // Byte-LRU (F3): a parità di URL i re-download spariscono; SSRF check,
+  // signal/timeout e cap size restano dentro doFetch, invariati.
+  return cachedImageBytes(url, async () => {
+    const res = await timedFetch(url, { signal: combined })
+    if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
+    const cl = res.headers.get("content-length")
+    if (cl && Number(cl) > MAX_IMG_SIZE) throw new Error("image too large")
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (buf.length > MAX_IMG_SIZE) throw new Error("image too large")
+    return buf
+  })
 }
 
 export function isValidHex(color: string): boolean {

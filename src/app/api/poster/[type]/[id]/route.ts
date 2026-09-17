@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import sharp from "sharp"
 import { initSharp } from "@/lib/sharp-config"
-import { getImages, getDetails, getExternalIds, getKeywords, getReleaseDates, resolveRequestApiKey, type TMDBImage, type TMDBCompany } from "@/lib/tmdb"
+import { getImages, getDetails, getDetailsWithExternalIds, getExternalIds, getKeywords, getReleaseDates, resolveRequestApiKey, type TMDBImage, type TMDBCompany } from "@/lib/tmdb"
 import { getJWRankings, hasJWOffers } from "@/lib/justwatch"
 import { extractDigitalReleaseDate, isDigitalPreRelease } from "@/lib/pre-release"
 import { getById } from "@/lib/store"
@@ -9,7 +9,6 @@ import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { getServerDefaults } from "@/lib/server-defaults"
 import { getRegionDef, normalizeRegion, parseRegion, defaultRegionForLang } from "@/lib/regions"
 import { BEST_FIT_GLOBAL } from "@/lib/best-fit-config"
-import { warmFonts } from "@/lib/svg-badge"
 import { selectBestLogoFitPosterPath } from "@/lib/poster-auto-fit"
 import { fetchAllWikidata, matchTMDBStudios, directorBadgeLabel } from "@/lib/awards"
 import { createT } from "@/lib/i18n"
@@ -80,6 +79,8 @@ import { resolveStreamQuality } from "@/lib/stream-quality"
 import { applyMinQuality, type StreamQuality } from "@/lib/quality-tiers"
 import { computeVote } from "@/lib/rating-weights"
 import { combineAbortSignals } from "@/lib/abort-signal"
+import { cachedImageBytes } from "@/lib/image-bytes-cache"
+import { timedFetch } from "@/lib/outbound-stats"
 import { createHash } from "node:crypto"
 import { fetchCustomRatings, resolveCustomRatingConfig, type RatingItem } from "@/lib/custom-rating"
 
@@ -149,7 +150,6 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   const startTime = Date.now()
   initSharp()
   const rl = await rateLimit(rateLimitKey(req), "poster")
-  warmFonts()
   if (!rl.ok) return rateLimitResponse(rl.retAfter)
   const { type, id } = await params
   const mediaType = (["series", "tv", "show", "tvshow"].includes(type?.toLowerCase() || "")) ? "tv" : "movie"
@@ -599,20 +599,24 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         extIds = sessionData.externalIds ?? { imdb_id: null, tvdb_id: null }
       } else {
         const baseLangs = `${preferredLanguage},en,null`
-        const [det, ext, imgs] = await Promise.all([
-          getDetails(mediaType, tmdbId, preferredLanguage, apiKey, renderAbort.signal, POSTER_TMDB_TIMEOUT_MS),
-          getExternalIds(mediaType, tmdbId, apiKey, renderAbort.signal, POSTER_TMDB_TIMEOUT_MS).catch(() => ({ imdb_id: null, tvdb_id: null })),
+        // D4: details + external_ids in un colpo solo (niente RTT separato per
+        // gli external_ids). Stesso schema/chiavi del path cataloghi.
+        const [det, imgs] = await Promise.all([
+          getDetailsWithExternalIds(mediaType, tmdbId, preferredLanguage, apiKey, renderAbort.signal, POSTER_TMDB_TIMEOUT_MS),
           getImages(mediaType, tmdbId, baseLangs, apiKey, renderAbort.signal, POSTER_TMDB_TIMEOUT_MS),
         ])
         details = det
-        extIds = ext
+        extIds = {
+          imdb_id: det.external_ids?.imdb_id ?? null,
+          tvdb_id: det.external_ids?.tvdb_id ?? null,
+        }
         const origLang = det.original_language
         const needsOrigLang = origLang && origLang !== preferredLanguage && origLang !== "en"
           && (imgs.posters.length === 0 || imgs.logos.length === 0)
         images = needsOrigLang
           ? await getImages(mediaType, tmdbId, `${baseLangs},${origLang}`, apiKey, renderAbort.signal, POSTER_TMDB_TIMEOUT_MS).catch(() => imgs)
           : imgs
-        setTMDBSessionCache(mediaType, tmdbId, { details: det, images, externalIds: ext })
+        setTMDBSessionCache(mediaType, tmdbId, { details: det, images, externalIds: extIds })
       }
       // Candidato sfondo per il ramo landscape: backdrop principale TMDB,
       // poi il primo backdrops di /images (già 16:9 nativi).
@@ -691,21 +695,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
             const bestFit = await selectBestLogoFitPosterPath({
               posters: images.posters, logoPath,
               fetchImage: async (path: string) => {
-                // B5: combina col watchdog — prima AbortSignal.timeout(5000)
-                // ignorava renderAbort: dopo la deadline i fetch continuavano
-                // come zombie (slot già liberato, lavoro buttato).
-                const res = await fetch(imgSrc(path), { signal: combineAbortSignals(renderAbort.signal, 5000) })
-                if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                return Buffer.from(await res.arrayBuffer())
+                // Byte-LRU (F3): key = URL finale (imgSrc lancia su URL esterni
+                // come prima, fuori dalla cache). B5: signal combinato col
+                // watchdog così dopo la deadline non restano zombie.
+                const url = imgSrc(path)
+                return cachedImageBytes(url, async () => {
+                  const res = await timedFetch(url, { signal: combineAbortSignals(renderAbort.signal, 5000) })
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                  return Buffer.from(await res.arrayBuffer())
+                })
               },
               fetchCandidateImage: async (path: string) => {
                 if (path.startsWith("http") && !path.startsWith("https://image.tmdb.org/t/p/")) {
                   throw new Error("Blocked external URL in fetchCandidateImage")
                 }
                 const url = path.startsWith("http") ? path : `https://image.tmdb.org/t/p/w342${path}`
-                const res = await fetch(url, { signal: combineAbortSignals(renderAbort.signal, 5000) })
-                if (!res.ok) throw new Error(`HTTP ${res.status}`)
-                return Buffer.from(await res.arrayBuffer())
+                return cachedImageBytes(url, async () => {
+                  const res = await timedFetch(url, { signal: combineAbortSignals(renderAbort.signal, 5000) })
+                  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+                  return Buffer.from(await res.arrayBuffer())
+                })
               },
               hasBadges: true,
             })
@@ -750,11 +759,11 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
             const remoteTvdbId = extIds.tvdb_id
               ?? (imdbId
                 ? (mediaType === "movie"
-                  ? await getTvdbMovieId(imdbId, tvdbApiKey)
-                  : await getTvdbSeriesId(imdbId, tvdbApiKey))
+                  ? await getTvdbMovieId(imdbId, tvdbApiKey, renderAbort.signal)
+                  : await getTvdbSeriesId(imdbId, tvdbApiKey, renderAbort.signal))
                 : null)
             if (remoteTvdbId) {
-              const arts = await getTvdbArtworks(mediaType, remoteTvdbId, tvdbApiKey)
+              const arts = await getTvdbArtworks(mediaType, remoteTvdbId, tvdbApiKey, renderAbort.signal)
               tvdbRescue = pickTvdbPoster(arts, preferredLanguage)?.image ?? null
             }
           } catch {

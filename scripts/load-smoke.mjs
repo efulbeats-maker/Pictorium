@@ -100,6 +100,36 @@ function statusHeaders() {
   return adminToken ? { "x-admin-token": adminToken } : {}
 }
 
+// Snapshot outbound/status per il confronto prima/dopo (Step 0a): reads
+// additive, zero effetto sul carico misurato.
+async function statusSnapshot() {
+  try {
+    const res = await fetch(`${appUrl}/api/cache/status`, { headers: statusHeaders() })
+    if (!res.ok) return null
+    const j = await res.json()
+    return { outbound: j.outbound || {}, rssMb: j.system?.memory?.rssMb ?? null }
+  } catch {
+    return null
+  }
+}
+
+function printOutboundDelta(before, after) {
+  if (!before || !after) {
+    log("Outbound: snapshot non disponibile (status 401? imposta BENCH_ADMIN_TOKEN)")
+    return
+  }
+  log("Outbound Δ per host (intera sessione scenari):")
+  const hosts = new Set([...Object.keys(before.outbound || {}), ...Object.keys(after.outbound || {})])
+  for (const h of [...hosts].sort()) {
+    const b = (before.outbound || {})[h] || { requests: 0, errors: 0 }
+    const a = (after.outbound || {})[h] || { requests: 0, errors: 0 }
+    log(`  ${h}: +${a.requests - b.requests} req, +${a.errors - b.errors} err, avg ${a.avgMs}ms`)
+  }
+  if (before.rssMb !== null && after.rssMb !== null) {
+    log(`RSS: ${before.rssMb}MB → ${after.rssMb}MB (Δ ${(after.rssMb - before.rssMb).toFixed(1)}MB)`)
+  }
+}
+
 const children = []
 function spawnNode(args, env = {}) {
   const child = spawn(process.execPath, args, {
@@ -880,6 +910,7 @@ async function run() {
   for (let i = 0; i < 3; i++) {
     await fetch(`${appUrl}/api/poster/movie/1999${i}`)
   }
+  const outboundBefore = await statusSnapshot()
 
   const elapsedSec = () => (Date.now() - startedAt) / 1000
   let exitCode = 0
@@ -902,6 +933,8 @@ async function run() {
   }
 
   printMatrix()
+
+  printOutboundDelta(outboundBefore, await statusSnapshot())
 
   log(`--- Totale: ${elapsedSec().toFixed(1)}s ---`)
   log(exitCode === 0 ? "PASS: scenari completati senza errori" : `EXIT ${exitCode}`)

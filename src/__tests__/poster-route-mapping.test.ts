@@ -4,7 +4,7 @@ import { NextRequest } from "next/server"
 import { GET } from "@/app/api/poster/[type]/[id]/route"
 import { getById } from "@/lib/store"
 import { selectBestLogoFitPosterPath } from "@/lib/poster-auto-fit"
-import { getDetails, getImages, getExternalIds } from "@/lib/tmdb"
+import { getDetails, getDetailsWithExternalIds, getImages, getExternalIds } from "@/lib/tmdb"
 import { getJWRankings } from "@/lib/justwatch"
 import { fetchMDBList } from "@/lib/mdblist"
 import { cacheClear } from "@/lib/cache"
@@ -42,7 +42,6 @@ vi.mock("@/lib/poster-auto-fit", () => ({
 }))
 
 vi.mock("@/lib/svg-badge", () => ({
-  warmFonts: vi.fn(),
   renderGenreBadge: vi.fn(async () => null),
   renderRankingBadge: vi.fn(async () => null),
   renderExtraBadge: vi.fn(async () => null),
@@ -81,6 +80,23 @@ vi.mock("@/lib/ratings", async (importOriginal) => {
 
 vi.mock("@/lib/tmdb", () => ({
   getDetails: vi.fn(),
+  // F5a: il path non-mappato chiama SOLO la combined. Di default delega ai
+  // due mock storici così i test esistenti (che armano getDetails/getExternalIds)
+  // restano verdi senza rewrite; il wiring è pinnato dal test F6/F5a sotto.
+  getDetailsWithExternalIds: vi.fn(
+    async (
+      mediaType: "movie" | "tv",
+      tmdbId: number,
+      language?: string,
+      apiKey?: string,
+      signal?: AbortSignal,
+      timeoutMs?: number,
+    ) => {
+      const det = await mockedGetDetails(mediaType, tmdbId, language, apiKey, signal, timeoutMs)
+      const ext = await mockedGetExternalIds(mediaType, tmdbId, apiKey, signal, timeoutMs)
+      return { ...det, external_ids: ext }
+    },
+  ),
   getImages: vi.fn(),
   getExternalIds: vi.fn(async () => ({ imdb_id: null })),
   getKeywords: vi.fn(async () => []),
@@ -95,6 +111,7 @@ const mockedGetById = vi.mocked(getById)
 const mockedGetJWRankings = vi.mocked(getJWRankings)
 const mockedSelectBestLogoFitPosterPath = vi.mocked(selectBestLogoFitPosterPath)
 const mockedGetDetails = vi.mocked(getDetails)
+const mockedGetDetailsWithExternalIds = vi.mocked(getDetailsWithExternalIds)
 const mockedGetImages = vi.mocked(getImages)
 const mockedGetExternalIds = vi.mocked(getExternalIds)
 const mockedFetchMDBList = vi.mocked(fetchMDBList)
@@ -577,23 +594,31 @@ describe("GET /api/poster/[type]/[id] with saved mappings", () => {
 
     // Azzera la history dei mock: gli altri test del describe la inquinano.
     mockedGetDetails.mockClear()
+    mockedGetDetailsWithExternalIds.mockClear()
     mockedGetImages.mockClear()
     mockedGetExternalIds.mockClear()
 
     const req1 = new NextRequest("http://localhost:3000/api/poster/movie/42?preview=1")
     const res1 = await GET(req1, { params: Promise.resolve({ type: "movie", id: "42" }) })
     expect(res1.status).toBe(200)
-    const detailsAfterFirst = mockedGetDetails.mock.calls.length
+    // F5a: il ramo non-mappato chiama la combined UNA volta sola e MAI
+    // getDetails/getExternalIds diretti per il fetch iniziale (entrambi i
+    // conteggi sotto passano solo via delega del mock combined; il Block B
+    // riusa la session cache e non rifà rete).
+    expect(mockedGetDetailsWithExternalIds.mock.calls.length).toBe(1)
+    expect(mockedGetDetails.mock.calls.length).toBe(1) // solo via delega combined
     const imagesAfterFirst = mockedGetImages.mock.calls.length
     const extAfterFirst = mockedGetExternalIds.mock.calls.length
-    expect(detailsAfterFirst).toBeGreaterThan(0)
+    expect(imagesAfterFirst).toBeGreaterThan(0)
+    expect(extAfterFirst).toBe(1) // solo via delega combined
 
     // Secondo tick di preview con parametri diversi → cache key diversa, ma la
     // session cache per type:id evita di rifare i fetch TMDB.
     const req2 = new NextRequest("http://localhost:3000/api/poster/movie/42?preview=1&blur=0")
     const res2 = await GET(req2, { params: Promise.resolve({ type: "movie", id: "42" }) })
     expect(res2.status).toBe(200)
-    expect(mockedGetDetails.mock.calls.length).toBe(detailsAfterFirst)
+    expect(mockedGetDetailsWithExternalIds.mock.calls.length).toBe(1)
+    expect(mockedGetDetails.mock.calls.length).toBe(1)
     expect(mockedGetImages.mock.calls.length).toBe(imagesAfterFirst)
     expect(mockedGetExternalIds.mock.calls.length).toBe(extAfterFirst)
   })

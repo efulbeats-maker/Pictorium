@@ -9,6 +9,7 @@ export default defineConfig({
       "node_modules/**",
       ".kilo/**",
       ".claude/**",
+      ".opencode/**",
       ".next/**",
       "e2e/**",
       "test-results/**",

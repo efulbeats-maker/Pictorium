@@ -1,7 +1,18 @@
-import { describe, it, expect, vi } from "vitest"
-import { screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { fireEvent, screen } from "@testing-library/react"
 import { SettingsPanel } from "@/components/SettingsPanel"
 import { renderWithCtx } from "@/__tests__/test-utils"
+import { resetGuestGuardForTests } from "@/lib/guest-guard"
+
+// UserSpaceSection (renderizzato dal pannello) richiede l'app router di Next:
+// in jsdom non è montato (stesso mock usato in EditViewGate.test.tsx).
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+}))
+
+beforeEach(() => {
+  vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })))
+})
 
 describe("SettingsPanel", () => {
   it("renders genre/rating badge toggle and mirror card", () => {
@@ -124,5 +135,90 @@ describe("SettingsPanel", () => {
     expect(closeButtons.length).toBeGreaterThan(0)
     fireEvent.click(closeButtons[0])
     expect(closeSpy).toHaveBeenCalledWith(false)
+  })
+
+  it("mostra la sezione PIN con multi-user spento", async () => {
+    resetGuestGuardForTests()
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) =>
+        String(url).includes("/api/status")
+          ? { ok: true, json: async () => ({ multiUser: false }) }
+          : { ok: false, json: async () => ({}) },
+      ),
+    )
+    renderWithCtx(
+      <SettingsPanel
+        setSettingsOpen={() => {}}
+        exportData={() => {}}
+        importData={() => {}}
+      />
+    )
+    expect(await screen.findByText("ui.pinSecurityTitle")).toBeInTheDocument()
+    resetGuestGuardForTests()
+  })
+
+  it("nasconde la sezione PIN con multi-user attivo (niente doppio lucchetto)", async () => {
+    resetGuestGuardForTests()
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) =>
+        String(url).includes("/api/status")
+          ? { ok: true, json: async () => ({ multiUser: true }) }
+          : { ok: false, json: async () => ({}) },
+      ),
+    )
+    renderWithCtx(
+      <SettingsPanel
+        setSettingsOpen={() => {}}
+        exportData={() => {}}
+        importData={() => {}}
+      />
+    )
+    // Il pannello c'è (altro contenuto stabile), la sezione PIN sparisce.
+    expect(await screen.findAllByText("ui.genreRatingBadge")).not.toHaveLength(0)
+    expect(screen.queryByText("ui.pinSecurityTitle")).not.toBeInTheDocument()
+    resetGuestGuardForTests()
+  })
+
+  it("tab Spazio dedicato: fuori da Dati & Cache, solo con contenuto", async () => {
+    resetGuestGuardForTests()
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) =>
+        String(url).includes("/api/status")
+          ? { ok: true, json: async () => ({ multiUser: true }) }
+          : { ok: false, json: async () => ({}) },
+      ),
+    )
+    renderWithCtx(
+      <SettingsPanel
+        setSettingsOpen={() => {}}
+        exportData={() => {}}
+        importData={() => {}}
+      />
+    )
+    // Quinto tab; il gate vive lì dentro (divider crea/entri).
+    const tab = await screen.findByRole("tab", { name: "ui.settingsTabSpace" })
+    expect(screen.getAllByRole("tab")).toHaveLength(5)
+    fireEvent.click(tab)
+    expect(tab).toHaveAttribute("aria-selected", "true")
+    expect(await screen.findByText("ui.userSpaceOr")).toBeInTheDocument()
+    resetGuestGuardForTests()
+  })
+
+  it("senza multi-user né /u/ il tab Spazio non esiste (restano 4)", async () => {
+    resetGuestGuardForTests()
+    renderWithCtx(
+      <SettingsPanel
+        setSettingsOpen={() => {}}
+        exportData={() => {}}
+        importData={() => {}}
+      />
+    )
+    expect(await screen.findAllByText("ui.genreRatingBadge")).not.toHaveLength(0)
+    expect(screen.queryByRole("tab", { name: "ui.settingsTabSpace" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("tab")).toHaveLength(4)
+    resetGuestGuardForTests()
   })
 })

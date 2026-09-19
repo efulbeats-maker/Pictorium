@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, type MouseEvent, type KeyboardEvent } from "react"
 import { usePSelector } from "@/lib/context"
+import { currentPathUuid } from "@/lib/user-token"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { toSearchResult, type SearchResult } from "@/lib/types"
 import { useSecurePosterUrl } from "@/lib/useSecurePosterUrl"
@@ -87,13 +88,20 @@ export function HomeHero() {
   // classifiche giornaliere (JustWatch DAILY_POPULARITY esposta da
   // /api/tmdb/trending): il podio cambia a ogni visita. Ogni poster mostra il
   // badge rank reale della posizione del titolo in classifica.
+  // Namespace utente (?u=) per i poster del podio: senza, il server non può
+  // risolvere le chiavi salvate nel profilo e risponde 503 su profilo fresco
+  // (chiave nel namespace ma niente chiave device). A `/` è stringa vuota.
+  const nsSuffix = useMemo(() => {
+    const id = currentPathUuid()
+    return id ? `&u=${id}` : ""
+  }, [])
   const slots = useMemo<PodiumSlot[]>(() => {
     const movies = trending.filter((i) => i.media_type === "movie").sort((a, b) => a.rank - b.rank)
     const tv = trending.filter((i) => i.media_type === "tv").sort((a, b) => a.rank - b.rank)
     if (movies.length < 2 || tv.length < 1) {
       // URL pulite: la chiave viaggia solo via header x-api-key (hook
       // useSecurePosterUrl) — mai incollata in query string.
-      return FALLBACK_PODIUM.map((p) => ({ ...p, url: p.url() }))
+      return FALLBACK_PODIUM.map((p) => ({ ...p, url: `${p.url()}${nsSuffix}` }))
     }
     const [m1, m2] = shuffle(movies)
     const [s1] = shuffle(tv)
@@ -103,9 +111,9 @@ export function HomeHero() {
       className: ["p-frame p-frame-side p-frame-left", "p-frame p-frame-main", "p-frame p-frame-side p-frame-right"][i],
       alt: titleOf(item),
       item,
-      url: `/api/poster/${item.media_type}/${item.id}?ranking=&rank=${item.rank}&rs=${SLOT_RANK_STYLES[i]}&tl=0&gradHeight=25&blur=30&bf=50&bd=40&logoFit=0`,
+      url: `/api/poster/${item.media_type}/${item.id}?ranking=&rank=${item.rank}&rs=${SLOT_RANK_STYLES[i]}&tl=0&gradHeight=25&blur=30&bf=50&bd=40&logoFit=0${nsSuffix}`,
     }))
-  }, [trending, titleOf])
+  }, [trending, titleOf, nsSuffix])
 
   // Parallasse attivo solo su dispositivi con hover (desktop); calcolato una
   // volta per non ri-eseguire matchMedia a ogni mousemove.

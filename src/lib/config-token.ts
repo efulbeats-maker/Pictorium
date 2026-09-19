@@ -175,6 +175,14 @@ export function decodeConfig(token: string): PictoriumUserConfig | null {
 
     const parsed = JSON.parse(json)
 
+    // Back-compat barra ranking rimossa: i token firmati prima della rimozione
+    // possono contenere rankingBadgeStyle "bar" — senza pre-map l'intero token
+    // fallirebbe safeParse e l'utente perderebbe TUTTA la config (non solo lo
+    // stile). Degrada a "default", come fa la query ?rs=bar.
+    if ((parsed as Record<string, unknown>)?.rankingBadgeStyle === "bar") {
+      (parsed as Record<string, unknown>).rankingBadgeStyle = "default"
+    }
+
     // Batch C: validazione via Zod — sostituisce la validazione manuale
     // con type narrowing automatico e messaggi di errore strutturati.
     const result = configTokenSchema.safeParse(parsed)

@@ -1,4 +1,6 @@
 import type { PosterEditorCtx } from "@/lib/contexts/PosterEditorContext"
+import { userFetch } from "@/lib/http"
+import { defaultsStorageKey } from "@/lib/useDefaults"
 
 function safeSetItem(key: string, val: string) {
   try { localStorage.setItem(key, val) } catch { /* localStorage non disponibile */ }
@@ -58,8 +60,9 @@ export function saveDefaults(ed: PosterEditorCtx): Promise<boolean> {
     logoAlign: ed.defaultLogoAlign,
     episodeMetadataSource: ed.defaultEpisodeMetadataSource,
   }
-  safeSetItem("badgeDefaults", JSON.stringify(d))
-  const syncPromise = fetch("/api/defaults", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) })
+  safeSetItem(defaultsStorageKey(), JSON.stringify(d))
+  // userFetch: su path /u/<uuid> il PUT va nel namespace (token da storage).
+  const syncPromise = userFetch("/api/defaults", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) })
     .then((res) => {
       if (res.ok) return true
       // 401 (admin fail-closed) / 403 origin / 5xx: il localStorage è salvato ma

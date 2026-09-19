@@ -1,6 +1,6 @@
 import crypto from "node:crypto"
 import { NextRequest } from "next/server"
-import { getDetails, getExternalIds } from "@/lib/tmdb"
+import { getDetails, getExternalIds, resolveRouteApiKey } from "@/lib/tmdb"
 import { fetchAggregatedRating, SUPPORTED_RATING_SOURCES } from "@/lib/ratings"
 import { computeVote } from "@/lib/rating-weights"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
@@ -22,8 +22,8 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   const { id } = await params
   const type = req.nextUrl.searchParams.get("type") || "movie"
   const language = req.nextUrl.searchParams.get("language") || "it-IT"
-  const apiKey = req.nextUrl.searchParams.get("api_key") || undefined
-  const mdblistKey = req.nextUrl.searchParams.get("mdblist_key") || undefined
+  const apiKey = await resolveRouteApiKey(req)
+  const mdblistKey = await resolveRouteApiKey(req, "mdblist")
   const rsrc = req.nextUrl.searchParams.get("rsrc") || undefined
   const validSources = SUPPORTED_RATING_SOURCES as readonly string[]
   const ratingSources = rsrc

@@ -218,4 +218,33 @@ describe("useDefaults hydration", () => {
     expect(latest!.gradientHeight).toBe(50)
     expect(latest!.defaultGradientHeight).toBe(45)
   })
+
+  it("su path /u/<uuid> legge/scrive badgeDefaults:<uuid>, mai il globale", async () => {
+    const uuid = "11111111-1111-4111-8111-111111111111"
+    window.history.replaceState({}, "", `/u/${uuid}/configure`)
+    try {
+      // Avanzi di un altro profilo nel globale: non devono inquinare.
+      storage.setItem("badgeDefaults", JSON.stringify({ ...USER_SAVED, badgeYear: true, gradientHeight: 10 }))
+      storage.setItem(`badgeDefaults:${uuid}`, JSON.stringify(USER_SAVED))
+      const { result } = renderHook(() => useDefaults())
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1200)
+      })
+      // Vale il namespaced (badgeYear false), non il globale (true).
+      expect(result.current.badgeYear).toBe(false)
+      expect(result.current.defaultGradientHeight).toBe(45)
+      act(() => {
+        result.current.update({ defaultBadgeYear: true, badgeYear: true })
+      })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1200)
+      })
+      // Scritture sul namespaced; il globale resta intatto.
+      expect(JSON.parse(storage.getItem(`badgeDefaults:${uuid}`)!).badgeYear).toBe(true)
+      expect(JSON.parse(storage.getItem("badgeDefaults")!).badgeYear).toBe(true)
+      expect(JSON.parse(storage.getItem("badgeDefaults")!).gradientHeight).toBe(10)
+    } finally {
+      window.history.replaceState({}, "", "/")
+    }
+  })
 })

@@ -74,6 +74,13 @@ vi.mock("@/lib/tmdb", () => ({
   getExternalIds: vi.fn(async () => ({ imdb_id: null })),
   getKeywords: vi.fn(async () => []),
   resolveRequestApiKey: vi.fn(() => undefined),
+  // La route risolve le chiavi via resolveUserApiKeys (namespace incluso):
+  // mock fedele = nessuna chiave in questo test.
+  resolveUserApiKeys: vi.fn(async () => ({
+    tmdb: { key: undefined, source: "none" },
+    mdblist: { key: undefined, source: "none" },
+    tvdb: { key: undefined, source: "none" },
+  })),
 }))
 
 vi.mock("@/lib/imdb-resolver", () => ({

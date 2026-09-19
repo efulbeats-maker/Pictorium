@@ -1,5 +1,5 @@
 import { createLogger } from "./logger"
-import { getJWTitleQuality } from "./justwatch"
+import { getJWTitleQualityResult } from "./justwatch"
 import { getExternalIds } from "./tmdb"
 import { envWithFallback } from "./env-compat"
 import { timedFetch } from "./outbound-stats"
@@ -15,7 +15,52 @@ export { parseMinQuality, isQualityAtLeast, applyMinQuality } from "./quality-ti
 const TORRENTIO_BASE_URL = (envWithFallback("TORRENTIO_URL") || process.env.TORRENTIO_URL || "https://torrentio.strem.fun").replace(/\/+$/, "")
 const STREAM_CACHE_TTL = 30 * 60 * 1000 // 30 minutes
 const STREAM_CACHE_TTL_NULL = 2 * 60 * 1000 // 2 minutes for null (evita cache avvelenata su Vercel)
-const qualityCache = new Map<string, { quality: StreamQuality | null; timestamp: number }>()
+
+// Esito del rilevamento qualità: "resolved" = chiamata completata (anche con
+// quality null = esito negativo accertato, es. film 1950 senza stream);
+// "timeout" = abort per deadline; "error" = HTTP non-OK / rete. Solo
+// resolved-null può cachare a lungo: timeout/error danno render degradato con
+// TTL effimero (vedi route poster), altrimenti un outage di 10s avvelena la
+// cache per 6h.
+export type QualityStatus = "resolved" | "timeout" | "error"
+export type QualitySource = "torrentio" | "justwatch" | "none"
+
+export interface StreamQualityResult {
+  readonly quality: StreamQuality | null
+  readonly status: QualityStatus
+  readonly source: QualitySource
+  readonly rawTokens?: string[]
+}
+
+const qualityCache = new Map<string, { quality: StreamQualityResult; timestamp: number }>()
+
+/** True se l'errore è uno scatto di deadline (AbortSignal.timeout / race). */
+export function isQualityTimeout(err: unknown): boolean {
+  // DOMException di abort/timeout (fetch): in Node NON è instanceof Error,
+  // quindi il check sul nome viene prima e copre entrambi i nomi standard.
+  if (err instanceof DOMException && (err.name === "AbortError" || err.name === "TimeoutError")) return true
+  if (typeof DOMException !== "undefined" && (err as DOMException)?.name === "AbortError") return true
+  if (err instanceof Error) {
+    if (err.name === "AbortError" || err.name === "TimeoutError") return true
+    if (/aborted|timeout|timed out/i.test(err.message)) return true
+  }
+  return false
+}
+
+/** Token grezzi (es. ["2160p","4k"]) dal testo degli stream — solo debug=1. */
+export function extractRawQualityTokens(
+  streams: Array<{ name?: string; title?: string; behaviorHints?: { filename?: string; bingeGroup?: string } }>,
+): string[] {
+  const found = new Set<string>()
+  if (!Array.isArray(streams)) return []
+  for (const s of streams) {
+    const text = `${s.name || ""} ${s.title || ""} ${s.behaviorHints?.filename || ""} ${s.behaviorHints?.bingeGroup || ""}`
+    for (const m of text.matchAll(/\b(4k|2160p?|uhd|1080p?|fhd|720p?|hd|480p?|576p?|sd|dvdrip|cam|ts)\b/gi)) {
+      found.add(m[1].toLowerCase())
+    }
+  }
+  return [...found]
+}
 
 export function parseStreamQualityFromStreams(
   streams: Array<{ name?: string; title?: string; behaviorHints?: { filename?: string; bingeGroup?: string } }>
@@ -50,7 +95,7 @@ export async function fetchTorrentioQuality(
   type: "movie" | "series",
   imdbId: string,
   signal?: AbortSignal
-): Promise<StreamQuality | null> {
+): Promise<StreamQualityResult> {
   const streamId = type === "movie" ? imdbId : `${imdbId}:1:1`
   const url = `${TORRENTIO_BASE_URL}/stream/${type}/${encodeURIComponent(streamId)}.json`
   try {
@@ -78,15 +123,15 @@ export async function fetchTorrentioQuality(
       })
       if (!res.ok) {
         log.debug("Torrentio non-OK", { imdbId, status: res.status })
-        return null
+        return { quality: null, status: "error", source: "torrentio" }
       }
       const data = await res.json()
       const q = parseStreamQualityFromStreams(data?.streams)
       if (q) log.debug("Torrentio quality", { imdbId, quality: q })
-      return q
+      return { quality: q, status: "resolved", source: "torrentio", rawTokens: extractRawQualityTokens(data?.streams ?? []) }
     } catch (err) {
       log.debug("Torrentio stream quality check failed or timed out", { imdbId, error: err instanceof Error ? err.message : String(err) })
-      return null
+      return { quality: null, status: isQualityTimeout(err) ? "timeout" : "error", source: "torrentio" }
     }
 }
 
@@ -96,15 +141,20 @@ export async function resolveStreamQuality(
   tmdbId?: number | null,
   searchTitle?: string | null,
   signal?: AbortSignal
-): Promise<StreamQuality | null> {
+): Promise<StreamQualityResult> {
   const cacheKey = `${type}:${imdbId || tmdbId || searchTitle}`
   const cached = qualityCache.get(cacheKey)
   if (cached) {
-    const ttl = cached.quality === null ? STREAM_CACHE_TTL_NULL : STREAM_CACHE_TTL
+    // TTL differenziato per esito: resolved (anche null) 30min, timeout/error
+    // 2min — un outage non deve restare appiccicato alla chiave.
+    const ttl = cached.quality.status === "resolved" ? STREAM_CACHE_TTL : STREAM_CACHE_TTL_NULL
     if (Date.now() - cached.timestamp < ttl) return cached.quality
   }
 
-  let quality: StreamQuality | null = null
+  const store = (r: StreamQualityResult): StreamQualityResult => {
+    qualityCache.set(cacheKey, { quality: r, timestamp: Date.now() })
+    return r
+  }
 
   // 1. Try Torrentio via IMDb ID
   let targetImdbId = imdbId
@@ -117,25 +167,43 @@ export async function resolveStreamQuality(
     } catch {}
   }
 
+  let torrentioFailure: StreamQualityResult | null = null
   if (targetImdbId && targetImdbId.startsWith("tt")) {
-    quality = await fetchTorrentioQuality(type, targetImdbId, signal)
+    const t = await fetchTorrentioQuality(type, targetImdbId, signal)
+    if (t.quality) return store(t)
+    // 200 con streams vuoti = resolved-null (esito negativo accertato): il
+    // fallback JW può ancora arricchire, ma se non trova nulla resta resolved.
+    if (t.status !== "resolved") torrentioFailure = t
   }
 
   // 2. Fallback to JustWatch GraphQL if Torrentio returned nothing and tmdbId is present
-  if (!quality && tmdbId) {
+  if (tmdbId) {
     try {
-      quality = await getJWTitleQuality(
+      const jw = await getJWTitleQualityResult(
         tmdbId,
         type === "movie" ? "MOVIE" : "SHOW",
         searchTitle,
         "IT",
         signal
       )
-    } catch {}
+      if (jw.quality) return store({ quality: jw.quality, status: "resolved", source: "justwatch" })
+      // ok=false (breaker aperto o trasporto fallito) = incertezza, NON miss:
+      // resta l'eventuale failure di Torrentio, altrimenti error effimero.
+      // Solo ok=true con quality null è esito negativo accertato.
+      if (!jw.ok) {
+        return store(torrentioFailure ?? {
+          quality: null,
+          status: signal?.aborted ? "timeout" : "error",
+          source: "justwatch",
+        })
+      }
+      return store(torrentioFailure ?? { quality: null, status: "resolved", source: targetImdbId ? "torrentio" : "justwatch" })
+    } catch (err) {
+      return store(torrentioFailure ?? { quality: null, status: isQualityTimeout(err) ? "timeout" : "error", source: "justwatch" })
+    }
   }
 
-  qualityCache.set(cacheKey, { quality, timestamp: Date.now() })
-  return quality
+  return store(torrentioFailure ?? { quality: null, status: "resolved", source: "none" })
 }
 
 export function __resetStreamQualityCache() {

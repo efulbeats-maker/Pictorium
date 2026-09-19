@@ -180,7 +180,7 @@ describe("GET /catalog/[type]/[id]", () => {
       globalBadges: true,
       rankingBadges: true,
       badgeStyle: "pill",
-      rankingBadgeStyle: "bar",
+      rankingBadgeStyle: "pill",
       blurEnabled: true,
       blurIntensity: 12,
       blurFade: 45,
@@ -198,7 +198,7 @@ describe("GET /catalog/[type]/[id]", () => {
 
     expect(res.status).toBe(200)
     expect(posterUrl.searchParams.get("bs")).toBe("pill")
-    expect(posterUrl.searchParams.get("rs")).toBe("bar")
+    expect(posterUrl.searchParams.get("rs")).toBe("pill")
     expect(posterUrl.searchParams.get("blur")).toBe("12")
     expect(posterUrl.searchParams.get("bf")).toBe("45")
     expect(posterUrl.searchParams.get("bd")).toBe("55")

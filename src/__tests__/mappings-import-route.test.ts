@@ -63,6 +63,6 @@ describe("POST /api/mappings/import (M12 — rate limit + cap)", () => {
     expect(importMappings).toHaveBeenCalledWith([
       expect.objectContaining({ tmdbId: 1 }),
       expect.objectContaining({ tmdbId: 2 }),
-    ])
+    ], null)
   })
 })

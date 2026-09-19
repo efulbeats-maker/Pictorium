@@ -1,13 +1,15 @@
 import crypto from "node:crypto"
 import { NextRequest } from "next/server"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
-import { cacheGet, cacheGetShared, cacheSet } from "@/lib/cache"
+import { cacheGet, cacheGetShared, cacheSet, hashUserFragment } from "@/lib/cache"
 import { getTop10 } from "@/lib/flixpatrol"
-import { getServerDefaults } from "@/lib/server-defaults"
+import { getServerDefaults, getServerDefaultsForUser, type ServerDefaults } from "@/lib/server-defaults"
+import { getScopedUserId, userRateLimitKey } from "@/lib/user-auth"
+import { touchUserActivity } from "@/lib/user-activity"
 import { POSTER_URL_VERSION } from "@/lib/render-version"
 import { getById } from "@/lib/store"
 import { decodeConfig, type PictoriumUserConfig } from "@/lib/config-token"
-import { getDetails, getDetailsWithExternalIds, getGenreList, getImages, personMovieCredits, personTvCredits, posterUrlOriginal, resolveRequestApiKey, searchMovies, searchPerson, searchTV, tmdbFindByImdb, type TMDBDetails } from "@/lib/tmdb"
+import { getDetails, getDetailsWithExternalIds, getGenreList, getImages, personMovieCredits, personTvCredits, posterUrlOriginal, resolveUserApiKeys, searchMovies, searchPerson, searchTV, tmdbFindByImdb, type TMDBDetails } from "@/lib/tmdb"
 import { resolveImdbId } from "@/lib/imdb-cache"
 import { fetchMDBList } from "@/lib/mdblist"
 import { fetchUnifiedCatalogItems } from "@/lib/custom-catalog-providers"
@@ -20,10 +22,18 @@ import { createLogger } from "@/lib/logger"
 import { concurrentMap } from "@/lib/episode-ordering"
 import { isPersonQuery, pickTopPerson } from "@/lib/person-search"
 import { normalizeCatalogId, normalizeCatalogIdKeys, normalizeCatalogIdList } from "@/lib/catalog-definitions"
-import { envWithFallback } from "@/lib/env-compat"
 import { isPosterShape, type PosterShape } from "@/lib/types"
 
 const log = createLogger("catalog")
+
+// Contatori key-missing per /api/status (solo memoria, mai segreti): quante
+// risposte catalogo JW sono uscite vuote per mancanza chiave vs totale JW.
+let jwCatalogRequests = 0
+let jwKeyMissing = 0
+
+export function getKeyMissingStats(): { catalogs: number; keyMissing: number } {
+  return { catalogs: jwCatalogRequests, keyMissing: jwKeyMissing }
+}
 
 interface StremioMeta {
   id: string
@@ -205,11 +215,23 @@ function isKnownCatalogId(catalogId: string): boolean {
  * ("US") che slug FlixPatrol ("united-states"), fail-closed su IT.
  */
 export function resolveCatalogRegion(req: NextRequest, userConfig: Partial<PictoriumUserConfig> | null): RegionDef {
+  return resolveCatalogRegionWithDefaults(req, userConfig, getServerDefaults())
+}
+
+/**
+ * Variante con defaults già risolti (multi-user: i defaults del namespace).
+ * `resolveCatalogRegion` sopra resta il wrapper globale invariato.
+ */
+export function resolveCatalogRegionWithDefaults(
+  req: NextRequest,
+  userConfig: Partial<PictoriumUserConfig> | null,
+  defaults: ServerDefaults,
+): RegionDef {
   const fromQuery = parseRegion(req.nextUrl.searchParams.get("region") ?? req.nextUrl.searchParams.get("country"))
   if (fromQuery) return getRegionDef(fromQuery)
   const fromConfig = parseRegion((userConfig as { region?: string } | null)?.region)
   if (fromConfig) return getRegionDef(fromConfig)
-  return getRegionDef(normalizeRegion(getServerDefaults().region))
+  return getRegionDef(normalizeRegion(defaults.region))
 }
 
 // La chiave MDBList della richiesta resta SOLO server-side (fetch rank/voti
@@ -237,10 +259,11 @@ async function pictoriumPosterAndShape(
   posterLang = "it",
   posterRegion?: string | null,
 ): Promise<{ poster: string; banner: string; posterShape: PosterShape }> {
-  const serverDefaults = getServerDefaults()
+  const scopedUser = getScopedUserId(userParam)
+  const serverDefaults = scopedUser ? await getServerDefaultsForUser(scopedUser) : getServerDefaults()
   const userConfig = configParam ? decodeConfig(configParam) : null
   const defaults = userConfig ? { ...serverDefaults, ...userConfig } : serverDefaults
-  const mapping = await getById(type === "series" ? "tv" : "movie", id)
+  const mapping = await getById(type === "series" ? "tv" : "movie", id, scopedUser)
   const base = {
     origin: getOriginFromRequest(req),
     type,
@@ -365,7 +388,12 @@ export async function pictoriumCatalog(
   configParam: string | null,
   extraSegments?: string[] | string | null,
 ): Promise<Response> {
-  const rl = await rateLimit(rateLimitKey(req), "catalog")
+  // Namespace per il rate-limit (multi-user): risolto PRIMA del bucket così
+  // il flood su `?u=vittima` non brucia la quota del proprietario.
+  // NB: userParam qui è già canonico (path vince, vedi route /u/): nessuna
+  // doppia identità a questo livello.
+  const preScopedUser = getScopedUserId(userParam)
+  const rl = await rateLimit(preScopedUser ? userRateLimitKey(req, preScopedUser) : rateLimitKey(req), "catalog")
   if (!rl.ok) return rateLimitResponse(rl.retAfter)
 
   // Alias legacy: gli addon Stremio installati prima del rename usano ID
@@ -376,25 +404,31 @@ export async function pictoriumCatalog(
   const stType = normalizeCatalogType(mediaType)
   if (!stType) return catalogResponse({ metas: [] }, 400)
   const extra = parseCatalogExtra(extraSegments, req.nextUrl.searchParams)
-  const mdblistKeyParam = req.nextUrl.searchParams.get("mdblist_key") || undefined
-  // Chiave TMDB della richiesta: parte del cache key così un catalogo vuoto
-  // servito a una richiesta senza chiave non avvelena quelle keyed (D3).
-  const apiKey = resolveRequestApiKey(req)
-  // Chiave MDBList della richiesta (anime/custom): parametro esplicito o, come
-  // fallback per istanze personali, env PICTORIUM_MDBLIST_KEY. Il param `?u=`
-  // NON fornisce chiavi (solo identità/tracking).
-  const mdblistKey = mdblistKeyParam || envWithFallback("MDBLIST_KEY")
+  // Namespace utente (multi-user): null con flag OFF o senza `?u=` → path
+  // globale byte-identico a oggi. Con `u` → SOLO namespace, mai fallback.
+  const scopedUser = getScopedUserId(userParam)
+  // Attività di lettura per il cleanup inattivi (throttled, fire-and-forget).
+  if (scopedUser) touchUserActivity(scopedUser)
+  // Chiavi effettive (slice 2): esplicite della richiesta > namespace utente
+  // (solo con `?u=`) > env d'istanza. La chiave effettiva entra nel cache key
+  // (hash) così un catalogo vuoto servito senza chiave non avvelena quelli
+  // keyed (D3) e due namespace non collidono.
+  const resolvedKeys = await resolveUserApiKeys(req, scopedUser)
+  const apiKey = resolvedKeys.tmdb.key
+  // Chiave MDBList (anime/custom): senza chiave né fallback la lista usa il
+  // fallback pubblico (vedi ramo anime sotto).
+  const mdblistKey = resolvedKeys.mdblist.key
+  const effectiveDefaults = scopedUser ? await getServerDefaultsForUser(scopedUser) : getServerDefaults()
   let userConfig: Partial<PictoriumUserConfig> | null = null
   if (configParam) {
     userConfig = decodeConfig(configParam)
   }
   if (!userConfig) {
-    const serverDefaults = getServerDefaults()
     userConfig = {
-      disabledCatalogIds: serverDefaults.disabledCatalogIds,
-      customCatalogs: serverDefaults.customCatalogs,
-      catalogRenames: serverDefaults.catalogRenames,
-      catalogOrder: serverDefaults.catalogOrder,
+      disabledCatalogIds: effectiveDefaults.disabledCatalogIds,
+      customCatalogs: effectiveDefaults.customCatalogs,
+      catalogRenames: effectiveDefaults.catalogRenames,
+      catalogOrder: effectiveDefaults.catalogOrder,
     } as PictoriumUserConfig
   }
   // Config salvate prima del rename possono contenere ID `pictorium-*`:
@@ -408,12 +442,12 @@ export async function pictoriumCatalog(
   // altre istanze — senza questi frammenti un body cachato (con vecchi poster
   // URL) resterebbe servito fino al refresh schedulato (~24h). Ogni save
   // (mapping/defaults) fa bump dell'epoch.
-  const epoch = await getCatalogEpoch()
-  const sdHash = hashFragment(JSON.stringify(getServerDefaults()))
+  const epoch = await getCatalogEpoch(scopedUser)
+  const sdHash = hashFragment(JSON.stringify(effectiveDefaults))
   const freshness = `:e${epoch}:sd${sdHash}`
   // Regione classifiche (JustWatch + FlixPatrol) e lingua titoli: entra in ogni
   // cache key così cataloghi di paesi diversi non si avvelenano a vicenda.
-  const region = resolveCatalogRegion(req, userConfig)
+  const region = resolveCatalogRegionWithDefaults(req, userConfig, effectiveDefaults)
   const tmdbLang = region.lang
   const posterLang = tmdbLang.slice(0, 2).toLowerCase()
   const regionFragment = `:r${region.code}`
@@ -422,9 +456,14 @@ export async function pictoriumCatalog(
   if (extra.search) {
     const isPeopleCatalog = catalogId.startsWith("pictorium-search-people-")
     if (isPeopleCatalog) {
-      if (!apiKey) return catalogResponse({ metas: [] })
+      // Senza chiave (né richiesta, né namespace, né env): catalogo vuoto +
+      // motivo nel log (mai `metas: []` silenziosi e misteriosi).
+      if (!apiKey) {
+        log.debug("Catalog key-missing: no TMDB key", { catalogId })
+        return catalogResponse({ metas: [] })
+      }
       const page = Math.floor((extra.skip || 0) / 20) + 1
-      const searchCacheKey = `stremio:search:people:${stType}:${hashFragment(extra.search)}:p${page}:pv${POSTER_URL_VERSION}${userParam ? `:u${hashFragment(userParam)}` : ""}:ak${hashFragment(apiKey)}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${regionFragment}${freshness}`
+      const searchCacheKey = `stremio:search:people:${stType}:${hashFragment(extra.search)}:p${page}:pv${POSTER_URL_VERSION}${scopedUser ? `:u${hashUserFragment(scopedUser)}` : ""}:ak${hashFragment(apiKey)}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${regionFragment}${freshness}`
       const cachedSearch = cacheGet<{ metas: StremioMeta[] }>(searchCacheKey)
       if (cachedSearch) return catalogResponse(cachedSearch)
 
@@ -499,9 +538,12 @@ export async function pictoriumCatalog(
       }
     }
 
-    if (!apiKey) return catalogResponse({ metas: [] })
+    if (!apiKey) {
+      log.debug("Catalog key-missing: no TMDB key", { catalogId })
+      return catalogResponse({ metas: [] })
+    }
     const page = Math.floor((extra.skip || 0) / 20) + 1
-    const searchCacheKey = `stremio:search:${stType}:${hashFragment(extra.search)}:p${page}:pv${POSTER_URL_VERSION}${userParam ? `:u${hashFragment(userParam)}` : ""}:ak${hashFragment(apiKey)}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${regionFragment}${freshness}`
+    const searchCacheKey = `stremio:search:${stType}:${hashFragment(extra.search)}:p${page}:pv${POSTER_URL_VERSION}${scopedUser ? `:u${hashUserFragment(scopedUser)}` : ""}:ak${hashFragment(apiKey)}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${regionFragment}${freshness}`
     const cachedSearch = cacheGet<{ metas: StremioMeta[] }>(searchCacheKey)
     if (cachedSearch) return catalogResponse(cachedSearch)
 
@@ -556,7 +598,7 @@ export async function pictoriumCatalog(
 
   const skipFragment = typeof extra.skip === "number" && extra.skip > 0 ? `:s${extra.skip}` : ""
   const genreFragment = extra.genre && extra.genre !== "Tutti" ? `:g${hashFragment(extra.genre)}` : ""
-  const cacheKey = `stremio:catalog:v2:${stType}:${catalogId}:pv${POSTER_URL_VERSION}${userParam ? `:u${hashFragment(userParam)}` : ""}:ak${apiKey ? hashFragment(apiKey) : "none"}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${genreFragment}${skipFragment}${regionFragment}${freshness}`
+  const cacheKey = `stremio:catalog:v2:${stType}:${catalogId}:pv${POSTER_URL_VERSION}${scopedUser ? `:u${hashUserFragment(scopedUser)}` : ""}:ak${apiKey ? hashFragment(apiKey) : "none"}${configParam ? `:cfg${hashFragment(configParam)}` : ""}${mdblistKey ? `:mk${hashFragment(mdblistKey)}` : ""}${genreFragment}${skipFragment}${regionFragment}${freshness}`
   // C1: L1 + L2 condivisa (KV su multi-istanza, no-op locale/VPS).
   const cached = await cacheGetShared<{ metas: StremioMeta[] }>(cacheKey, ["stremio", "catalog"])
   if (cached) return catalogResponse(cached)
@@ -655,7 +697,12 @@ export async function pictoriumCatalog(
       }
     } else if (catalogId.startsWith("pictorium-jw")) {
       // Fix L12: la chiave si controlla PRIMA del fetch JustWatch
-      if (!apiKey) return catalogResponse({ metas: [] })
+      jwCatalogRequests++
+      if (!apiKey) {
+        jwKeyMissing++
+        log.debug("Catalog key-missing: no TMDB key", { catalogId })
+        return catalogResponse({ metas: [] })
+      }
       // streamingCharts non supporta `offset`: l'overfetch da zero + slice è
       // l'unico modo per paginare (l'arricchimento TMDB resta comunque sui 20
       // della finestra). popularTitles invece pagina nativo: first = finestra.

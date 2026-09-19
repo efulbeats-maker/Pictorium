@@ -151,7 +151,8 @@ export function resolvePosterRenderConfig(input: PosterRenderConfigInput): Poste
   const hasRank = !!(input.animeRank || input.rankingResult || mapping?.badgeRank || mapping?.trendRank || qRankParam || input.finalRank)
   // "default" = auto-detect: mostra il badge stile Netflix se c'è un rank,
   // altrimenti badge standard. Se il sorgente (mapping/query/config) specifica
-  // un valore esplicito (bar/pill/colored/netflix), viene rispettato senza override.
+  // un valore esplicito (pill/colored/bordo/vetro/netflix), viene rispettato
+  // senza override ("bar" rimosso: degrada a "default" via isRankingBadgeStyle).
   if (hasRank && rankingBadgeStyle === "default") {
     rankingBadgeStyle = "netflix"
   } else if (!hasRank && rankingBadgeStyle === "netflix") {

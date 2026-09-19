@@ -287,7 +287,8 @@ test.describe("poster API — functional", () => {
     expect(buffer.length).toBeGreaterThan(1000)
   })
 
-  test("ranking badge (bar) + label — valid image", async ({ request }) => {
+  test("ranking badge (removed bar style degrades to default) — valid image", async ({ request }) => {
+    // Stile "bar" rimosso: ?rs=bar degrada a default senza 400.
     const url = posterUrl({ genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "1", rank: "3", label: "Top 3", rs: "bar" })
     const res = await request.get(url)
     expect(res.ok()).toBeTruthy()
@@ -330,7 +331,7 @@ test.describe("poster API — functional", () => {
   })
 
   test("full config — valid image", async ({ request }) => {
-    const url = posterUrl({ genreName: "Action", voteAverage: "8.0", badges: "1", ranking: "1", rank: "5", label: "Top 5", bs: "pill", rs: "bar", gradHeight: "25", blur: "5", bf: "50", bd: "30" })
+    const url = posterUrl({ genreName: "Action", voteAverage: "8.0", badges: "1", ranking: "1", rank: "5", label: "Top 5", bs: "pill", rs: "pill", gradHeight: "25", blur: "5", bf: "50", bd: "30" })
     const res = await request.get(url)
     expect(res.ok()).toBeTruthy()
     const buffer = await res.body()
@@ -433,12 +434,6 @@ test.describe("poster API — visual regression", () => {
     await expect(poster).toHaveScreenshot("poster-ranking-default.png", { maxDiffPixelRatio: 0.10 })
   })
 
-  test("ranking badge + label — screenshot", async ({ page }) => {
-    const url = posterUrl({ genreName: "Action", voteAverage: "7.8", badges: "1", ranking: "1", rank: "3", label: "Top 3", rs: "bar" })
-    const poster = await renderPoster(page, url)
-    await expect(poster).toHaveScreenshot("poster-ranking.png", { maxDiffPixelRatio: 0.10 })
-  })
-
   test("anime ranking (netflix ribbon) — screenshot", async ({ page }) => {
     // media_type=tv + id 19995 (Avatar) nella MDBList anime mockata → animeRankResult=1.
     // Il mock MDBList anime (mock-server.mjs) mette Avatar in posizione #1.
@@ -483,7 +478,7 @@ test.describe("poster API — visual regression", () => {
   })
 
   test("full feature poster — screenshot", async ({ page }) => {
-    const url = posterUrl({ genreName: "Action", voteAverage: "8.0", badges: "1", ranking: "1", rank: "5", label: "Top 5", bs: "pill", rs: "bar", gradHeight: "25", blur: "5", bf: "50", bd: "30" })
+    const url = posterUrl({ genreName: "Action", voteAverage: "8.0", badges: "1", ranking: "1", rank: "5", label: "Top 5", bs: "pill", rs: "pill", gradHeight: "25", blur: "5", bf: "50", bd: "30" })
     const poster = await renderPoster(page, url)
     await expect(poster).toHaveScreenshot("poster-full-feature.png", { maxDiffPixelRatio: 0.10 })
   })

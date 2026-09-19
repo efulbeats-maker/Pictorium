@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server"
-import { getAll, getById, upsert, removeAll } from "@/lib/store"
+import { getAll, getById, upsert, removeAll, QuotaExceededError } from "@/lib/store"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
-import { cacheInvalidate, cacheInvalidatePosterData, cacheInvalidatePosterDataFor } from "@/lib/cache"
+import { cacheInvalidate, cacheInvalidatePosterData, cacheInvalidatePosterDataFor, cacheInvalidatePosterDataForUser } from "@/lib/cache"
 import { bumpCatalogEpoch } from "@/lib/catalog-epoch"
 import { mappingSchema } from "@/lib/validation"
 import { checkAdminToken, requireAdminToken, isSameOrigin, adminAuthResponse, originMismatchResponse } from "@/lib/auth"
+import { checkUserAuth, getScopedUserId, extractUserParam, invalidUserResponse, isMultiUserEnabled, userAuthResponse, userRateLimitKey } from "@/lib/user-auth"
 import { getWarmupCatalogs } from "@/lib/catalog-definitions"
 import { getServerDefaults } from "@/lib/server-defaults"
 import { buildStremioPosterUrl } from "@/lib/stremio-poster-url"
@@ -14,9 +15,40 @@ import { readJsonBody, BodyTooLargeError, DEFAULT_MAX_BODY_BYTES } from "@/lib/r
 
 const log = createLogger("mappings")
 
+/**
+ * Namespace della richiesta (multi-user): `?u=`/`?user=` validato, solo con
+ * flag ON. Ritorna `{ scoped }` o una Response di errore (400 uuid invalido).
+ * Con flag OFF o senza param → `{ scoped: null }` = path globale invariato.
+ */
+function resolveScope(req: NextRequest): { scoped: string | null; error?: Response } {
+  const rawUser = extractUserParam(req)
+  if (rawUser && isMultiUserEnabled() && !getScopedUserId(rawUser)) {
+    return { scoped: null, error: invalidUserResponse() }
+  }
+  return { scoped: getScopedUserId(rawUser) }
+}
+
+async function checkUserWrite(req: NextRequest, scoped: string): Promise<Response | null> {
+  // Secret oppure password (stile AIO): intercambiabili su tutti gli scoped.
+  if (!(await checkUserAuth(req, scoped))) return userAuthResponse()
+  if (!isSameOrigin(req)) return originMismatchResponse()
+  return null
+}
+
 export async function GET(req: NextRequest) {
-  const rl = await rateLimit(rateLimitKey(req), "mappings")
+  const { scoped, error } = resolveScope(req)
+  // Rate limit per-utente (multi-user): il bucket segue il namespace, non
+  // l'IP — la quota di A non brucia quella di B e viceversa.
+  const rl = await rateLimit(error ? rateLimitKey(req) : (scoped ? userRateLimitKey(req, scoped) : rateLimitKey(req)), "mappings")
   if (!rl.ok) return rateLimitResponse(rl.retAfter)
+  if (error) return error
+  if (scoped) {
+    if (!(await checkUserAuth(req, scoped))) {
+      return userAuthResponse()
+    }
+    const mappings = await getAll(scoped)
+    return Response.json({ mappings })
+  }
   // Fail-open senza ADMIN_TOKEN (istanza pubblica HF Spaces); fail-closed con token.
   if (!checkAdminToken(req)) return adminAuthResponse()
   const mappings = await getAll()
@@ -24,10 +56,17 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const rl = await rateLimit(rateLimitKey(req), "mappings")
+  const { scoped, error } = resolveScope(req)
+  const rl = await rateLimit(error ? rateLimitKey(req) : (scoped ? userRateLimitKey(req, scoped) : rateLimitKey(req)), "mappings")
   if (!rl.ok) return rateLimitResponse(rl.retAfter)
-  if (!checkAdminToken(req)) return adminAuthResponse()
-  if (!isSameOrigin(req)) return originMismatchResponse()
+  if (error) return error
+  if (scoped) {
+    const denied = await checkUserWrite(req, scoped)
+    if (denied) return denied
+  } else {
+    if (!checkAdminToken(req)) return adminAuthResponse()
+    if (!isSameOrigin(req)) return originMismatchResponse()
+  }
   let body: unknown
   try {
     body = await readJsonBody(req, DEFAULT_MAX_BODY_BYTES)
@@ -68,7 +107,24 @@ export async function POST(req: NextRequest) {
     updatedAt: new Date().toISOString(),
   }
 
-  await upsert(newMapping)
+  try {
+    await upsert(newMapping, scoped)
+  } catch (e) {
+    if (e instanceof QuotaExceededError) {
+      return Response.json({ error: e.message }, { status: 413 })
+    }
+    throw e
+  }
+
+  if (scoped) {
+    // Invalidazione mirata al namespace: il save di A non tocca B. Il bump
+    // dell'epoch utente ruota le sue chiavi catalogo/meta (stesso meccanismo
+    // cross-instance del globale) — niente wipe globale, niente warmup
+    // per-utente (piano v4: solo cataloghi globali).
+    cacheInvalidatePosterDataForUser(parsed.data.mediaType, parsed.data.tmdbId, scoped)
+    await bumpCatalogEpoch(scoped)
+    return Response.json({ ok: true })
+  }
 
   // Invalidazione mirata al mapping salvato, non globale (i default impattano
   // tutto, un singolo mapping solo il suo poster/badge).

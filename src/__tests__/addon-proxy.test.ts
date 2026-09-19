@@ -32,6 +32,40 @@ describe("Addon Proxy Helpers", () => {
     const res = await resolveImdbToTmdb("12345", "movie")
     expect(res).toBeNull()
   })
+
+  it("never touches background or logo (proxy conservativo: solo poster)", () => {
+    const metas: StremioItemMeta[] = [
+      {
+        id: "tt0111161",
+        type: "movie",
+        name: "The Shawshank Redemption",
+        poster: "https://original.poster/1.jpg",
+        background: "https://original.backdrop/1.jpg",
+        logo: "https://original.logo/1.png",
+      },
+    ]
+    const rewritten = rewriteMetasPosters(metas, "https://pictorium.app")
+    expect(rewritten[0].poster).toContain("https://pictorium.app/api/poster/movie/tt0111161")
+    expect(rewritten[0].background).toBe("https://original.backdrop/1.jpg")
+    expect(rewritten[0].logo).toBe("https://original.logo/1.png")
+
+    const single = rewriteSingleMetaPoster(metas[0], "https://pictorium.app")
+    expect(single.background).toBe("https://original.backdrop/1.jpg")
+    expect(single.logo).toBe("https://original.logo/1.png")
+  })
+
+  it("leaves third-party provider IDs untouched (no 400, no corrupt URLs)", () => {
+    const metas: StremioItemMeta[] = [
+      { id: "kitsu:123", type: "series", name: "Anime", poster: "https://original.poster/k.jpg" },
+      { id: "anidb:456", type: "series", name: "Anime 2", poster: "https://original.poster/a.jpg" },
+      { id: "tmdb:550", type: "movie", name: "TMDB prefixed", poster: "https://original.poster/t.jpg" },
+    ]
+    const rewritten = rewriteMetasPosters(metas, "https://pictorium.app")
+    expect(rewritten[0].poster).toBe("https://original.poster/k.jpg")
+    expect(rewritten[1].poster).toBe("https://original.poster/a.jpg")
+    // tmdb: prefisso risolvibile → parte numerica
+    expect(rewritten[2].poster).toContain("https://pictorium.app/api/poster/movie/550")
+  })
 })
 
 describe("isAllowedByAllowlist (C3/A1 — POSTERIUM_PROXY_ALLOW_DOMAINS)", () => {

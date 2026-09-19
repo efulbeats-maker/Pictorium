@@ -548,6 +548,14 @@ export function resolveMaxQuality(presentationTypes: (string | null | undefined)
 
 const qualityCache = new Map<string, { data: JWQuality | null; timestamp: number }>()
 
+export interface JWTitleQualityResult {
+  readonly quality: JWQuality | null
+  /** False quando il null NON è un miss genuino: breaker aperto o fallimento
+   *  di trasporto (ingoiato da fetchTitleOffersShared). Il chiamante decide
+   *  il TTL effimero invece di cachare a lungo un degradato. */
+  readonly ok: boolean
+}
+
 export async function getJWTitleQuality(
   tmdbId: number,
   objectType: "MOVIE" | "SHOW",
@@ -556,14 +564,25 @@ export async function getJWTitleQuality(
   signal?: AbortSignal,
   language = "it-IT",
 ): Promise<JWQuality | null> {
+  return (await getJWTitleQualityResult(tmdbId, objectType, searchTitle, country, signal, language)).quality
+}
+
+export async function getJWTitleQualityResult(
+  tmdbId: number,
+  objectType: "MOVIE" | "SHOW",
+  searchTitle?: string | null,
+  country = "IT",
+  signal?: AbortSignal,
+  language = "it-IT",
+): Promise<JWTitleQualityResult> {
   const cacheKey = `${objectType}:${country}:${tmdbId}`
   const cached = qualityCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data
+    return { quality: cached.data, ok: true }
   }
 
   if (isCircuitOpen()) {
-    return null
+    return { quality: null, ok: false }
   }
 
   const filter: Record<string, unknown> = {
@@ -574,7 +593,10 @@ export async function getJWTitleQuality(
   }
 
   const payload = await fetchTitleOffersShared(country, language, filter, signal)
-  if (!payload) return null
+  // Payload null = fallimento di trasporto (non miss genuina): ok=false così
+  // il chiamante applica TTL effimero invece di congelare il degradato.
+  // (hasJWOffers sotto resta fail-open a null: semantica invariata.)
+  if (!payload) return { quality: null, ok: false }
   {
     const edges = payload.edges
 
@@ -598,7 +620,7 @@ export async function getJWTitleQuality(
 
     if (qualityCache.size >= CACHE_MAX) qualityCache.delete(qualityCache.keys().next().value!)
     qualityCache.set(cacheKey, { data: maxQ, timestamp: Date.now() })
-    return maxQ
+    return { quality: maxQ, ok: true }
   }
 }
 

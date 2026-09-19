@@ -8,7 +8,8 @@ import { matchTMDBStudios } from "./awards"
 import { setLang as setI18nLang, createT } from "./i18n"
 import { isSupportedUiLang, getRegionDef, defaultRegionForLang } from "./regions"
 import type { EnrichedAnimeItem } from "./validation"
-import { http } from "./http"
+import { http, userFetch } from "./http"
+import { currentPathUuid, fetchWithUserAuthRetry, userAuthHeaders, USER_UNLOCK_EVENT } from "./user-token"
 import { copyText } from "./clipboard"
 import { useRootColors } from "./useRootColors"
 import { buildUrlPattern, buildPreviewUrl } from "./poster-url"
@@ -173,6 +174,10 @@ export interface PictoriumCtx {
   setTmdbKey: (v: string) => void
   /** True se l'istanza ha una chiave TMDB env (booleano pubblico /api/defaults). */
   serverHasTmdbKey: boolean
+  /** Presenza chiavi server-side del namespace (solo booleani, mai valori). */
+  serverKeyStatus: { tmdb: boolean; mdblist: boolean; tvdb: boolean } | null
+  /** UUID del namespace su path /u/<uuid> (o ?u=), null altrove. */
+  currentUserId: string | null
   mdblistApiKey: string
   setMdblistApiKey: (v: string) => void
   tvdbApiKey: string
@@ -323,6 +328,68 @@ export function usePictorium(): PictoriumCtx {
   // True se l'istanza ha una chiave TMDB env (booleano pubblico da
   // /api/defaults): la home funziona anche senza chiave nel browser.
   const [serverHasTmdbKey, setServerHasTmdbKey] = useState(false)
+  // Chiave TMDB env d'istanza (booleano pubblico da /api/defaults), separata
+  // da quella del namespace: l'effettivo è l'OR dei due (vedi sotto) così la
+  // rimozione della chiave profilo riazzera il flag invece di restare latchato.
+  const [instanceHasTmdbKey, setInstanceHasTmdbKey] = useState(false)
+  // Namespace utente (multi-user): uuid dal path /u/<uuid> (o ?u=). Mai
+  // catturato una volta sola: back/forward e navigazioni SPA che riusano
+  // l'albero lascerebbero lo stato stantio (listener post-unlock mai
+  // riattaccati, template AIO sull'uuid sbagliato) — si risincronizza a ogni
+  // unlock e a ogni popstate.
+  const [currentUserId, setCurrentUserId] = useState<string | null>(() => currentPathUuid())
+  useEffect(() => {
+    const syncPathUser = () => {
+      const id = currentPathUuid()
+      setCurrentUserId((prev) => (prev === id ? prev : id))
+    }
+    syncPathUser()
+    window.addEventListener(USER_UNLOCK_EVENT, syncPathUser)
+    window.addEventListener("popstate", syncPathUser)
+    return () => {
+      window.removeEventListener(USER_UNLOCK_EVENT, syncPathUser)
+      window.removeEventListener("popstate", syncPathUser)
+    }
+  }, [])
+  // Presenza chiavi server-side del namespace (solo booleani, mai valori):
+  // con token valido, il template AIO omette le chiavi (le risolve il server).
+  const [serverKeyStatus, setServerKeyStatus] = useState<{ tmdb: boolean; mdblist: boolean; tvdb: boolean } | null>(null)
+  useEffect(() => {
+    if (!currentUserId) return
+    let cancelled = false
+    const load = () => {
+      // Secret oppure password (di memoria): senza credenziale niente status.
+      const headers = userAuthHeaders(currentUserId)
+      if (Object.keys(headers).length === 0) {
+        if (!cancelled) setServerKeyStatus(null)
+        return
+      }
+      // Retry anti secret-stantio: un secret marcio in storage oscurerebbe la
+      // password fresca e il gate poster (serverHasTmdbKey) resterebbe chiuso
+      // fino al refresh — mentre gli altri loader (chiavi, identity) si
+      // riprendevano da soli. Stesso idioma di UserKeysSection.
+      fetchWithUserAuthRetry(currentUserId, `/api/users/${currentUserId}/keys`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled || !d) return
+          setServerKeyStatus({ tmdb: d.tmdb === true, mdblist: d.mdblist === true, tvdb: d.tvdb === true })
+        })
+        .catch(() => null)
+    }
+    load()
+    window.addEventListener(USER_UNLOCK_EVENT, load)
+    return () => {
+      cancelled = true
+      window.removeEventListener(USER_UNLOCK_EVENT, load)
+    }
+  }, [currentUserId])
+  // Chiave TMDB di sessione = env d'istanza OPPURE namespace: con una
+  // chiave profilo salvata, ricerca/trending/hero partono anche senza chiave
+  // nel browser (il server la risolve da `?u=`). Derivato (non latchato) così
+  // rimozione chiave / forget dello spazio spengono davvero i gate.
+  useEffect(() => {
+    setServerHasTmdbKey(instanceHasTmdbKey || serverKeyStatus?.tmdb === true)
+  }, [instanceHasTmdbKey, serverKeyStatus])
   const [mdblistApiKey, setMdblistApiKey] = useState("")
   const [tvdbApiKey, setTvdbApiKey] = useState("")
   const [tmdbKeyInput, setTmdbKeyInput] = useState("")
@@ -594,11 +661,12 @@ export function usePictorium(): PictoriumCtx {
     if (savedTheme === "light" || savedTheme === "dark") setTheme(savedTheme)
 
     // Se sul dispositivo corrente alcune chiavi sono vuote, interroga /api/defaults
-    // per prelevare le chiavi configurate sul server e pre-popolare il client
-    fetch("/api/defaults")
+    // per prelevare le chiavi configurate sul server e pre-popolare il client.
+    // userFetch: su path /u/<uuid> legge i defaults del namespace (token da storage).
+    userFetch("/api/defaults")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data?.hasInstanceKeys?.tmdbKey) setServerHasTmdbKey(true)
+        if (data?.hasInstanceKeys?.tmdbKey) setInstanceHasTmdbKey(true)
         if (!data?.serverKeys) return
         const { tmdbKey, mdblistApiKey: mdblistKey, tvdbApiKey: tvdbKey } = data.serverKeys
         if (!savedTmdb && tmdbKey) {
@@ -680,8 +748,13 @@ export function usePictorium(): PictoriumCtx {
       genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY,
       networkLogoOffsetX, networkLogoOffsetY,
       tmdbKey, lang, mdblistApiKey,
+      // AIO multi-user: `u=` nel template + niente chiavi in chiaro quando il
+      // namespace le ha server-side (il server risolve da namespace).
+      userId: currentUserId,
+      omitApiKey: serverKeyStatus?.tmdb === true,
+      omitMdblistKey: serverKeyStatus?.mdblist === true,
     }))
-    }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
+    }, [globalBadges, rankingBadges, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, badgeStyle, rankingBadgeStyle, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY, tmdbKey, lang, mdblistApiKey, currentUserId, serverKeyStatus]) // eslint-disable-line react-hooks/exhaustive-deps -- customBadge intentionally excluded to avoid loop
 
   // --- Preview URL ---
   const buildPreviewUrlCb = useCallback(() => {
@@ -696,6 +769,8 @@ export function usePictorium(): PictoriumCtx {
         metaInfo, trendRank, mdblistAnimeList: trending.mdblistAnimeList,
         topEdgeColor, bottomEdgeColor, accentColor, autoAccentColor, lang, tmdbKey,
         region: editorCtx.defaultRegion,
+        // Preview WYSIWYG nel namespace (altrimenti mostra il globale).
+        userId: currentUserId,
       },
       { globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY }
     )
@@ -703,7 +778,7 @@ export function usePictorium(): PictoriumCtx {
   }, [navigation.selected, navigation.previewPoster, navigation.selectedLogo, selectedBackdrop,
     logoScale, logoOffsetX, logoOffsetY, backdropScale, backdropOffsetX, backdropOffsetY,
     metaInfo, trendRank, trending.mdblistAnimeList, topEdgeColor, bottomEdgeColor, accentColor, autoAccentColor, lang, tmdbKey,
-    editorCtx.defaultRegion,
+    editorCtx.defaultRegion, currentUserId,
     globalBadges, rankingBadges, badgeStyle, rankingBadgeStyle, badgeGenre, badgeYear, badgeRating, badgeQuality, customRatings, ratingSources, customBadge, gradientHeight, blurIntensity, blurFade, blurDarkness, blurEnabled, tintStrength, networkLogo, preRelease, ribbonSide, posterShape, logoAlign, topBadgeScale, topBadgeOffsetX, topBadgeOffsetY, genreBadgeScale, qualityBadgeScale, networkLogoScale, genreBadgeOffsetX, genreBadgeOffsetY, qualityBadgeOffsetX, qualityBadgeOffsetY, networkLogoOffsetX, networkLogoOffsetY])
 
   // A1: trailing debounce della preview URL (200ms). Ogni tick di slider
@@ -1166,6 +1241,8 @@ export function usePictorium(): PictoriumCtx {
     tmdbKeyInput, setTmdbKeyInput,
     showKey, setShowKey, setTmdbKey,
     serverHasTmdbKey,
+    serverKeyStatus,
+    currentUserId,
     mdblistApiKey, setMdblistApiKey: setMdblistApiKeyFn,
     tvdbApiKey, setTvdbApiKey: setTvdbApiKeyFn,
     exportData, importData, removeRecentSearch: search.removeRecentSearch, clearRecentSearches: search.clearRecentSearches,
@@ -1197,6 +1274,8 @@ export function usePictorium(): PictoriumCtx {
     langOpen, settingsOpen, showLangPicker,
     tmdbKeyInput, showKey, copied, mdblistApiKey, tvdbApiKey,
     serverHasTmdbKey,
+    serverKeyStatus,
+    currentUserId,
     accentColor, autoAccentColor, setAccentColor,
     topEdgeColor, bottomEdgeColor, autoSaveExcludedPosters, autoSaveExcludedBackdrops, prefetchTitle,
     trending.trending, trending.trendingError, trending.streamingCharts, trending.mdblistAnimeList,

@@ -22,6 +22,32 @@ async function ink(png: Buffer) {
   return { count, minX, maxX, width: info.width }
 }
 
+/** Solo l'inchiostro scuro del testo (su pill chiara), misurato nell'interno
+ *  (margine 24px ai lati, sopra il fondo box in verticale — coordinate
+ *  relative all'interno): fondo e alone 3D coprono i bordi e la striscia
+ *  d'ombra sotto il box, quindi i bound full-canvas non dicono nulla sul
+ *  testo. Il testo ha comunque padding ≥16px oltre il padding ombra, quindi
+ *  l'interno lo contiene tutto. */
+async function textInk(png: Buffer, margin = 24) {
+  const { TOP_SHADOW_PAD } = await import("@/lib/badge-svg-shared")
+  const { data, info } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const yMax = info.height - TOP_SHADOW_PAD
+  let count = 0
+  let minX = info.width
+  let maxX = -1
+  for (let y = 0; y < yMax; y++) {
+    for (let x = margin; x < info.width - margin; x++) {
+      const i = (y * info.width + x) * 4
+      if (data[i + 3] > 10 && data[i] < 120 && data[i + 1] < 120 && data[i + 2] < 120) {
+        count++
+        minX = Math.min(minX, x - margin)
+        maxX = Math.max(maxX, x - margin)
+      }
+    }
+  }
+  return { count, minX, maxX, width: info.width - margin * 2 }
+}
+
 describe("fontFamilyFor", () => {
   it("keeps Inter for Latin text so the SVG stays byte-identical", () => {
     expect(fontFamilyFor("New season")).toBe("Inter")
@@ -49,9 +75,13 @@ describe("Hebrew badge rasterisation", () => {
     expect(he).not.toBeNull()
     const bounds = await ink(he!.png)
     expect(bounds.count).toBeGreaterThan(0)
-    // Il testo sta dentro la pill e non è schiacciato su un bordo.
-    expect(bounds.minX).toBeGreaterThan(0)
-    expect(bounds.maxX).toBeLessThan(bounds.width - 1)
+    // Il testo (inchiostro scuro, interno) sta dentro la pill e non è
+    // schiacciato su un bordo — i bound del fondo non contano più (copre
+    // tutto il canvas) e l'alone 3D vive ai bordi.
+    const text = await textInk(he!.png)
+    expect(text.count).toBeGreaterThan(0)
+    expect(text.minX).toBeGreaterThan(0)
+    expect(text.maxX).toBeLessThan(text.width - 1)
   })
 
   it("renders a Hebrew genre name next to Latin rating and year", async () => {
@@ -69,8 +99,9 @@ describe("Hebrew badge rasterisation", () => {
   it("sizes a Hebrew pill from its own advance widths, not the Latin default", async () => {
     // charWidthFactor tratta l'ebraico a 0.55: col vecchio default 0.62 la
     // stima sforava e `lengthAdjust="spacingAndGlyphs"` allargava i glifi.
+    // Misura sull'inchiostro del testo: il fondo copre tutta la pill.
     const he = await buildExtraBadgeSVG("עונה חדשה", 380, false, "default", "#D4A574")
-    const bounds = await ink(he!.png)
+    const bounds = await textInk(he!.png)
     const inkWidth = bounds.maxX - bounds.minX + 1
     expect(inkWidth).toBeGreaterThan(bounds.width * 0.5)
     expect(inkWidth).toBeLessThan(bounds.width)

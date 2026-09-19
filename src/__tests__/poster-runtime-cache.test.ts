@@ -12,6 +12,7 @@ import {
   posterHeaders,
   posterNotModifiedHeaders,
   posterResponse,
+  readCachedPoster,
   readPosterError,
   resolveImageFormat,
   serverTimingValue,
@@ -352,6 +353,37 @@ describe("dynamic TTL jitter (Milestone A, anti thundering-herd)", () => {
     } finally {
       spy.mockRestore()
     }
+  })
+
+  it("writeCachedPoster honors explicit ephemeral TTL + immutable=false (quality timeout)", () => {
+    cacheClear()
+    const records: Array<{ key: string; value: unknown; ttl?: number }> = []
+    const spy = vi
+      .spyOn(cacheModule, "cacheSet")
+      .mockImplementation((k: string, v: unknown, tags?: string[], ttl?: number) => {
+        records.push({ key: k, value: v, ttl })
+      })
+    try {
+      // Entry mappata ma degradata: TTL 120s invece di undefined (refresh giornaliero).
+      writeCachedPoster("poster:ephemeral", { buffer: Buffer.from("x"), etag: "\"e\"" }, "poster:movie:1", { ttlMs: 120_000, immutable: false })
+      expect(records).toHaveLength(2)
+      expect(records[0].ttl).toBe(120_000)
+      expect(records[1].ttl).toBe(120_000)
+      const headersRecord = records[1].value as { etag: string; ttlSec?: number; immutable?: boolean }
+      expect(headersRecord.etag).toBe("\"e\"")
+      expect(headersRecord.ttlSec).toBe(120)
+      expect(headersRecord.immutable).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+
+    // Round-trip su cache reale: la HIT rilegge ttlSec/immutable dallo storage (M3).
+    writeCachedPoster("poster:ephemeral", { buffer: Buffer.from("x"), etag: "\"e\"" }, "poster:movie:1", { ttlMs: 120_000, immutable: false })
+    const hit = readCachedPoster("poster:ephemeral")
+    expect(hit.payload?.etag).toBe("\"e\"")
+    expect(hit.ttlSec).toBe(120)
+    expect(hit.immutable).toBe(false)
+    cacheClear()
   })
 })
 

@@ -74,6 +74,10 @@ export default defineConfig({
         TVDB_API_KEY: "",
         POSTERIUM_TVDB_API_KEY: "",
         PICTORIUM_TVDB_API_KEY: "",
+        // Gate profili spento: un .env.local con PICTORIUM_MULTI_USER=1
+        // mostrerebbe il gate al posto della home e romperebbe gli snapshot.
+        PICTORIUM_MULTI_USER: "",
+        POSTERIUM_MULTI_USER: "",
         JUSTWATCH_API_URL: `${mockUrl}/graphql`,
         WIKIDATA_SPARQL_URL: `${mockUrl}/sparql`,
         IMDB_CHART_URL: `${mockUrl}/chart/top`,

@@ -16,6 +16,11 @@ import { formatRating } from "@/lib/custom-rating/formatter"
 import { REGIONS } from "@/lib/regions"
 import { UI_LANGUAGES } from "@/lib/utils"
 import { RatingSourceIcon } from "@/components/RatingSourceIcon"
+import { UserKeysSection } from "@/components/UserKeysSection"
+import { UserSpaceSection } from "@/components/UserSpaceSection"
+import { isMultiUserServer } from "@/lib/guest-guard"
+import { currentPathUuid } from "@/lib/user-token"
+import { consumeSettingsTab, type SettingsTabId } from "@/lib/settings-tab"
 import {
   Star,
   Trophy,
@@ -66,7 +71,13 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
   const { t } = useT()
   const ed = usePosterEditor()
 
-  const [activeTab, setActiveTab] = useState<"badge" | "trasforma" | "prefs" | "data">("badge")
+  const [activeTab, setActiveTab] = useState<"badge" | "trasforma" | "prefs" | "data" | "spazio">("badge")
+  useEffect(() => {
+    // Tab richiesta dalla toolbar prima dell'apertura (il pannello monta in
+    // async dopo il click): consumata qui, deterministica, niente race.
+    const requested: SettingsTabId | null = consumeSettingsTab()
+    if (requested) setActiveTab(requested)
+  }, [])
   const [sourcesOpen, setSourcesOpen] = useState(false)
   const [editVal, setEditVal] = useState<string | null>(null)
   const [editTxt, setEditTxt] = useState("")
@@ -98,6 +109,14 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
   const [curPinInput, setCurPinInput] = useState("")
   const [newPinInput, setNewPinInput] = useState("")
   const [pinBusy, setPinBusy] = useState(false)
+  // Multi-user ON: la sezione PIN sparisce (lì l'admin è ADMIN_TOKEN e il
+  // cancello è per-spazio). null = ancora ignoto: si mostra come oggi
+  // (fail-open display, mai togliere UI su rete lenta).
+  const [multiUserOn, setMultiUserOn] = useState<boolean | null>(null)
+  // Tab Spazio: solo quando ha contenuto (multi-user ON o path /u/).
+  // Stato (non lettura live) per non rompere l'hydration: appare al mount.
+  const [spacePathUuid, setSpacePathUuid] = useState<string | null>(null)
+  const showSpaceTab = multiUserOn === true || spacePathUuid !== null
 
   // Test provider custom rating (sample fisso server-side, chiave mai esposta).
   const [crTestBusy, setCrTestBusy] = useState(false)
@@ -147,6 +166,15 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
 
   useEffect(() => {
     refreshPin()
+    isMultiUserServer().then(
+      (v) => setMultiUserOn(v),
+      () => setMultiUserOn(false),
+    )
+    setSpacePathUuid(currentPathUuid())
+    // Richiesta esterna (icona chiave toolbar): salta al tab Spazio.
+    const onSpaceTab = () => setActiveTab("spazio")
+    window.addEventListener("pictorium:settings-space-tab", onSpaceTab)
+    return () => window.removeEventListener("pictorium:settings-space-tab", onSpaceTab)
   }, [])
 
   // Focus trap su mobile
@@ -278,6 +306,22 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
         <Database className="w-3.5 h-3.5" />
         <span>{t("ui.settingsTabData")}</span>
       </button>
+      {showSpaceTab && (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "spazio"}
+          onClick={() => setActiveTab("spazio")}
+          className={`flex items-center gap-2 py-3 px-3 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+            activeTab === "spazio"
+              ? "border-accent-orange text-accent-orange"
+              : "border-transparent text-zinc-400 hover:text-zinc-200"
+          }`}
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          <span>{t("ui.settingsTabSpace")}</span>
+        </button>
+      )}
     </div>
   )
 
@@ -1457,7 +1501,12 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
         </div>
       </div>
 
-      {/* Sicurezza & Accesso PIN */}
+      {/* (spazio utente, UUID e chiavi: nel tab Spazio dedicato sotto) */}
+
+      {/* Sicurezza & Accesso PIN — nascosta con multi-user ON (lì il cancello
+          è la password dello spazio e l'admin è ADMIN_TOKEN): niente doppio
+          lucchetto. Si mostra finché lo stato è ignoto (fail-open display). */}
+      {multiUserOn !== true && (
       <div className="bg-surface/50 border border-surface2/60 rounded-xl p-3.5 space-y-2.5 shadow-sm">
         <div className="flex items-center justify-between text-[11px] font-medium text-muted px-0.5">
           <span className="flex items-center gap-1.5 text-zinc-200 font-semibold">
@@ -1655,6 +1704,23 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
           </div>
         )}
       </div>
+      )}
+    </div>
+  )
+
+  // Scheda Spazio: identità/gate, UUID + recupero, chiavi API del namespace.
+  // Vive qui invece che in Dati & Cache: è l'account, non la manutenzione.
+  const spazioPanel = (
+    <div
+      role="tabpanel"
+      aria-label={t("ui.settingsTabSpace")}
+      className={`space-y-3.5 text-xs ${activeTab === "spazio" ? "block animate-tab-fade-in" : "hidden"}`}
+    >
+      {/* Spazio utente: gate crea/entri, UUID + recupero, identità (tab Spazio) */}
+      <UserSpaceSection />
+
+      {/* Chiavi API server-side del namespace (multi-user: solo su /u/<uuid>) */}
+      <UserKeysSection />
     </div>
   )
 
@@ -1698,6 +1764,7 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
           {trasformaPanel}
           {prefsPanel}
           {dataPanel}
+          {showSpaceTab && spazioPanel}
         </div>
         <div className="pt-3">
           {footer}
@@ -1754,6 +1821,7 @@ export function SettingsPanel({ setSettingsOpen, exportData, importData, mobile 
           {trasformaPanel}
           {prefsPanel}
           {dataPanel}
+          {showSpaceTab && spazioPanel}
         </div>
 
         {footer}

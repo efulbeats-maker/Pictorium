@@ -6,6 +6,8 @@ import type { PosterShape } from "./types"
 import { isPosterShape } from "./types"
 import { normalizeRegion } from "./regions"
 import { shouldSkipServerSync } from "./guest-guard"
+import { userFetch } from "./http"
+import { USER_UNLOCK_EVENT, currentPathUuid } from "./user-token"
 import { t } from "./i18n"
 import { normalizeSashOrder, DEFAULT_SASH_ORDER, type SashBucket } from "./badge-priority"
 
@@ -275,13 +277,24 @@ interface StoredDefaults {
 function readStoredDefaults(): StoredDefaults | null {
   if (typeof window === "undefined" || !window.localStorage) return null
   try {
-    const raw = window.localStorage.getItem("badgeDefaults")
+    const raw = window.localStorage.getItem(defaultsStorageKey())
     return raw ? JSON.parse(raw) : null
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     console.warn(`[defaults] Failed to read local defaults: ${message}`)
     return null
   }
+}
+
+/**
+ * Chiave localStorage dei default: namespaced per UUID sui path `/u/<uuid>`
+ * (niente inquinamento tra profili sullo stesso browser), globale altrove.
+ * Lo uuid è fisso per mount (il cambio path rimonta), quindi stabile dentro
+ * ogni effect che la usa.
+ */
+export function defaultsStorageKey(): string {
+  const uuid = currentPathUuid()
+  return uuid ? `badgeDefaults:${uuid}` : "badgeDefaults"
 }
 
 function safeSetItem(key: string, val: string) {
@@ -453,14 +466,11 @@ export function useDefaults() {
   // caricato, così il primo run dell'effetto di sync trova payload identico e non scrive.
   const lastPersistRef = useRef<string>("")
 
-  useEffect(() => {
-    const stored = readStoredDefaults()
-    const hydratedState = buildFromStored(stored)
-    setState(hydratedState)
-    lastPersistRef.current = JSON.stringify(defaultsToPayload(hydratedState))
-    setHydrated(true)
-
-    fetch("/api/defaults")
+  // Refresh defaults dal server (namespace via userFetch su /u/<uuid>).
+  // Estratto per riuso post-unlock: la prima fetch può aver girato senza
+  // token (race col #key=) e il merge server→locale va rifatto a sblocco.
+  const refreshFromServer = useCallback(() => {
+    userFetch("/api/defaults")
       .then((r) => (r.ok ? r.json() : null))
       .then((serverData) => {
         if (!serverData) return
@@ -483,10 +493,27 @@ export function useDefaults() {
         const updated = buildFromStored(merged)
         setState(updated)
         lastPersistRef.current = JSON.stringify(defaultsToPayload(updated))
-        safeSetItem("badgeDefaults", JSON.stringify(defaultsToPayload(updated)))
+        safeSetItem(defaultsStorageKey(), JSON.stringify(defaultsToPayload(updated)))
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    const stored = readStoredDefaults()
+    const hydratedState = buildFromStored(stored)
+    setState(hydratedState)
+    lastPersistRef.current = JSON.stringify(defaultsToPayload(hydratedState))
+    setHydrated(true)
+
+    refreshFromServer()
+  }, [refreshFromServer])
+
+  // Post-unlock: ricarica i defaults del namespace senza refresh pagina.
+  useEffect(() => {
+    const onUnlock = () => refreshFromServer()
+    window.addEventListener(USER_UNLOCK_EVENT, onUnlock)
+    return () => window.removeEventListener(USER_UNLOCK_EVENT, onUnlock)
+  }, [refreshFromServer])
 
   // Auto-persist: ogni cambio dei default scrive SUBITO su localStorage
   // e tenta il sync server (/api/defaults). Dedup via payload string — se cambiano
@@ -500,7 +527,7 @@ export function useDefaults() {
     lastPersistRef.current = payloadStr
 
     // Scrittura immediata e sincrona in localStorage ad ogni cambio
-    safeSetItem("badgeDefaults", payloadStr)
+    safeSetItem(defaultsStorageKey(), payloadStr)
 
     const timer = setTimeout(() => {
       // Guest guard: ospite da link altrui senza sessione su istanza con PIN
@@ -513,7 +540,7 @@ export function useDefaults() {
           console.debug("[defaults] Server sync skipped (guest without session)")
           return
         }
-        fetch("/api/defaults", {
+        userFetch("/api/defaults", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: payloadStr,

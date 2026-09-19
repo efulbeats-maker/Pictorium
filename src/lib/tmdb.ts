@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { createLogger } from "@/lib/logger"
 import { envWithFallback } from "@/lib/env-compat"
+import { isMultiUserEnabled } from "@/lib/user-auth"
 import { combineAbortSignals } from "./abort-signal"
 import { timedFetch } from "./outbound-stats"
 
@@ -249,6 +250,138 @@ export function resolveRequestApiKey(req: { headers: Headers | { get: (name: str
   const envKey = envWithFallback("TMDB_KEY") || process.env.TMDB_KEY || process.env.TMDB_API_KEY
   if (envKey) return envKey
   return undefined
+}
+
+export type ApiKeyKind = "tmdb" | "mdblist" | "tvdb"
+export type ApiKeySource = "header" | "query" | "namespace" | "env" | "none"
+
+export interface ResolvedApiKey {
+  key: string | undefined
+  source: ApiKeySource
+}
+
+export interface ResolvedUserApiKeys {
+  tmdb: ResolvedApiKey
+  mdblist: ResolvedApiKey
+  tvdb: ResolvedApiKey
+}
+
+type KeyRequest = {
+  headers: Headers | { get: (name: string) => string | null }
+  nextUrl?: { searchParams: URLSearchParams }
+  url?: string
+}
+
+function searchParamsOf(req: KeyRequest): URLSearchParams | null {
+  try {
+    if (req.nextUrl?.searchParams) return req.nextUrl.searchParams
+    if (req.url) return new URL(req.url).searchParams
+    return null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Chiave API effettiva per kind (multi-user, slice 2):
+ * esplicita della richiesta > namespace utente (solo con `userId`) > env
+ * globale d'istanza (opt-in). Con `userId` null il risultato è identico a
+ * oggi (header/query/env, catene env invariate per kind).
+ *
+ * Su istanza pubblica multi-user (flag ON) il fallback env è DISABILITATO
+ * solo per le richieste scoped (`userId` presente): altrimenti ogni `?u=`
+ * senza chiave brucia la quota dell'operatore (open-proxy sulla chiave
+ * d'istanza). Le richieste globali senza uuid tengono il fallback storico;
+ * opt-in esplicito con `PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK=1` per gli
+ * operatori che lo vogliono anche sugli scoped. Con flag OFF tutto è
+ * byte-identico a oggi.
+ *
+ * - tmdb: header `x-api-key` > query `api_key` > namespace.tmdb > env TMDB.
+ * - mdblist: query `mdblist_key` > namespace.mdblist > env MDBLIST.
+ * - tvdb: header `x-tvdb-key` > query `tvdb_key` > namespace.tvdb > env TVDB.
+ */
+export async function resolveUserApiKeys(
+  req: KeyRequest,
+  userId: string | null | undefined,
+): Promise<ResolvedUserApiKeys> {
+  const out: ResolvedUserApiKeys = {
+    tmdb: { key: undefined, source: "none" },
+    mdblist: { key: undefined, source: "none" },
+    tvdb: { key: undefined, source: "none" },
+  }
+  // 1. Richiesta esplicita (ogni kind indipendente: l'header TMDB non deve
+  // oscurare le query mdblist_key/tvdb_key).
+  const headerTmdb = req.headers.get("x-api-key")
+  if (headerTmdb) out.tmdb = { key: headerTmdb, source: "header" }
+  const sp = searchParamsOf(req)
+  if (!out.tmdb.key) {
+    const queryTmdb = sp?.get("api_key")
+    if (queryTmdb) out.tmdb = { key: queryTmdb, source: "query" }
+  }
+  const queryMdblist = sp?.get("mdblist_key")
+  if (queryMdblist) out.mdblist = { key: queryMdblist, source: "query" }
+  const queryTvdb = sp?.get("tvdb_key")
+  if (queryTvdb) out.tvdb = { key: queryTvdb, source: "query" }
+  else {
+    const headerTvdb = req.headers.get("x-tvdb-key")
+    if (headerTvdb) out.tvdb = { key: headerTvdb, source: "header" }
+  }
+  // 2. Namespace utente (una sola lettura per tutte le kind).
+  if (userId && (!out.tmdb.key || !out.mdblist.key || !out.tvdb.key)) {
+    try {
+      const { getUserKeys } = await import("@/lib/user-keys")
+      const scoped = await getUserKeys(userId)
+      if (!out.tmdb.key && scoped.tmdb) out.tmdb = { key: scoped.tmdb, source: "namespace" }
+      if (!out.mdblist.key && scoped.mdblist) out.mdblist = { key: scoped.mdblist, source: "namespace" }
+      if (!out.tvdb.key && scoped.tvdb) out.tvdb = { key: scoped.tvdb, source: "namespace" }
+    } catch {
+      // getUserKeys logga già: qui fallback all'env sotto (degraded, mai throw).
+    }
+  }
+  // 3. Fallback d'istanza (stesse catene env di oggi, invariate).
+  // Con flag multi-user ON è disabilitato SOLO per le richieste scoped
+  // (`userId` presente): altrimenti ogni `?u=` senza chiave brucia la quota
+  // dell'operatore (open-proxy sulla chiave d'istanza). Le richieste globali
+  // (senza uuid, path legacy) tengono il fallback invariato; opt-in esplicito
+  // con `PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK=1` per gli operatori che lo
+  // vogliono anche sugli scoped.
+  const allowEnvFallback = !userId
+    || !isMultiUserEnabled()
+    || process.env.PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK === "1"
+    || process.env.POSTERIUM_MULTI_USER_ALLOW_ENV_FALLBACK === "1"
+  if (allowEnvFallback && !out.tmdb.key) {
+    const env = envWithFallback("TMDB_KEY") || process.env.TMDB_KEY || process.env.TMDB_API_KEY
+    if (env) out.tmdb = { key: env, source: "env" }
+  }
+  if (allowEnvFallback && !out.mdblist.key) {
+    const env = envWithFallback("MDBLIST_KEY")
+    if (env) out.mdblist = { key: env, source: "env" }
+  }
+  if (allowEnvFallback && !out.tvdb.key) {
+    const env = envWithFallback("TVDB_API_KEY") || process.env.TVDB_API_KEY
+    if (env) out.tvdb = { key: env, source: "env" }
+  }
+  return out
+}
+
+/** Singola kind sopra la risoluzione unificata (una lettura namespace). */
+export async function resolveUserApiKey(
+  req: KeyRequest,
+  userId: string | null | undefined,
+  kind: ApiKeyKind,
+): Promise<ResolvedApiKey> {
+  return (await resolveUserApiKeys(req, userId))[kind]
+}
+
+/**
+ * Chiave effettiva per le route proxy upstream: esplicita della richiesta >
+ * namespace (`?u=`) > env d'istanza. Sostituisce le letture dirette di
+ * `api_key`/env nelle route, che ignoravano le chiavi salvate nel profilo
+ * (chiave salvata ma poster vuoti su profilo fresco).
+ */
+export async function resolveRouteApiKey(req: KeyRequest, kind: ApiKeyKind = "tmdb"): Promise<string | undefined> {
+  const { getScopedUserId, extractUserParam } = await import("@/lib/user-auth")
+  return (await resolveUserApiKeys(req, getScopedUserId(extractUserParam(req))))[kind].key
 }
 
 const inflight = new Map<string, Promise<unknown>>()

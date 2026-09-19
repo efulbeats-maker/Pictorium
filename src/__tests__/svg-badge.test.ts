@@ -1,6 +1,6 @@
 import sharp from "sharp"
 import { describe, expect, it } from "vitest"
-import { buildGenrePillSvg, buildGenreTextSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops, buildGenreGlassSvg, buildGenreBorderedSvg, buildRankingGlassSvg, buildRankingBorderedSvg, buildExtraBorderedSvg } from "@/lib/badge-svg-shared"
+import { buildGenrePillSvg, buildGenreTextSvg, buildGenreBarSvg, buildRankingDefaultSvg, buildExtraDefaultSvg, buildQualityBadgeSvg, glassStops, satinPillStops, buildGenreGlassSvg, buildGenreBorderedSvg, buildRankingGlassSvg, buildRankingBorderedSvg, buildExtraBorderedSvg } from "@/lib/badge-svg-shared"
 import { buildGenreBadgeSVG, buildRankingBadgeSVG, buildExtraBadgeSVG, buildNetflixRankBadgeSVG, renderComingSoonRibbon, comingSoonRibbonLayout } from "@/lib/svg-badge"
 
 async function alphaBounds(png: Buffer) {
@@ -76,7 +76,8 @@ describe("buildGenreBadgeSVG", () => {
 
     const badge = await buildGenreBadgeSVG("Sci-Fi & Fantasy", 8.2, 1000, "2019", "pill", "#555555", false)
     expect(badge).not.toBeNull()
-    expect(badge!.w).toBeLessThan(800)
+    // 800 di contenuto + 28 di padding ombra.
+    expect(badge!.w).toBeLessThan(830)
   })
 
   it("keeps long shadow genre badge within aesthetic width", async () => {
@@ -158,6 +159,29 @@ describe("buildGenreBadgeSVG", () => {
     expect(badge).not.toBeNull()
     expect(badge!.w).toBe(1000)
   })
+
+  it("renders genre bar with satin gradient, 3D shadow, adaptive 1.5px stroke", async () => {
+    const { svg } = buildGenreBarSvg("Dramma", "8.5", "2023", 380, 28, "rgba(0,0,0,0.88)", false)
+    expect(svg).toContain('fill="url(#gbg)"')
+    expect(svg).toContain('stop-color="rgba(255,255,255,0.95)"')
+    expect(svg).toContain('stroke="rgba(255,255,255,0.22)"')
+    expect(svg).toContain('stroke-width="1.5"')
+    expect(svg).toContain('filter="url(#tds)"')
+    expect(svg).not.toContain("<line ")
+    const light = buildGenreBarSvg("Dramma", "8.5", "2023", 380, 28, "rgba(255,255,255,0.95)", true)
+    expect(light.svg).toContain('stroke="rgba(0,0,0,0.12)"')
+    expect(light.svg).toContain('stop-color="rgba(0,0,0,0.88)"')
+  })
+
+  it("renders genre pill and quality badge with 3D shadow (satin and colored)", () => {
+    const pill = buildGenrePillSvg("Dramma", "8.5", "2023", 28, "rgba(255,255,255,0.80)", "rgba(0,0,0,0.80)")
+    expect(pill.svg).toContain('filter="url(#tds)"')
+    const colored = buildGenrePillSvg("Dramma", "8.5", "2023", 28, "#ff6430", "#ffffff", 0, undefined, false, false)
+    expect(colored.svg).toContain('fill="#ff6430"')
+    expect(colored.svg).toContain('filter="url(#tds)"')
+    const quality = buildQualityBadgeSvg("4K", 20, "", "", false)
+    expect(quality.svg).toContain('filter="url(#tds)"')
+  })
 })
 
 describe("GenreParts combinations", () => {
@@ -236,10 +260,12 @@ describe("buildRankingBadgeSVG", () => {
     expect(badge!.w).toBeLessThan(600)
   })
 
-  it("renders bar ranking badge full-width", async () => {
-    const badge = await buildRankingBadgeSVG(5, 1000, "Oggi", false, "bar", "#555555")
+  it("falls back to default plaque for the removed bar style", async () => {
+    // "bar" rimosso da RANKING_BADGE_STYLES: il renderer non lo distingue più
+    // dal default (il degrade query ?rs=bar→default vive in poster-config).
+    const badge = await buildRankingBadgeSVG(5, 1000, "Oggi", false, "bar" as never, "#555555")
     expect(badge).not.toBeNull()
-    expect(badge!.w).toBe(1000)
+    expect(badge!.w).toBeLessThan(600)
   })
 
   it("renders colored ranking badge", async () => {
@@ -377,10 +403,10 @@ describe("buildExtraBadgeSVG", () => {
     expect(badge!.w).toBeLessThan(600)
   })
 
-  it("renders bar extra badge full-width", async () => {
-    const badge = await buildExtraBadgeSVG("Vincitore Oscar", 1000, false, "bar", "#555555")
+  it("falls back to default plaque for the removed bar style", async () => {
+    const badge = await buildExtraBadgeSVG("Vincitore Oscar", 1000, false, "bar" as never, "#555555")
     expect(badge).not.toBeNull()
-    expect(badge!.w).toBe(1000)
+    expect(badge!.w).toBeLessThan(600)
   })
 
   it("handles long extra label with overflow protection", async () => {
@@ -478,6 +504,22 @@ describe("buildRankingDefaultSvg", () => {
     expect(svg).toContain('stop-color="rgba(255,255,255,0.95)"')
   })
 
+  it("has a single 3D box shadow and exact box geometry (ribbon-style finish)", () => {
+    const { svg, w, h } = buildRankingDefaultSvg("#1 Oggi", 60, "rgba(0,0,0,0.80)", "rgba(255,255,255,0.80)", false)
+    expect(svg).toContain("feDropShadow")
+    expect(svg).toContain('filter="url(#tds)"')
+    expect(svg).toContain('stroke-width="1.5"')
+    // Canvas = box esatta, senza padding ombra.
+    expect(svg).toContain(`width="${w}" height="${h}"`)
+  })
+
+  it("uses polarized 1.5px stroke (light on dark tops, dark on light tops)", () => {
+    const dark = buildRankingDefaultSvg("#1 Oggi", 60, "rgba(0,0,0,0.80)", "rgba(255,255,255,0.80)", false)
+    expect(dark.svg).toContain('stroke="rgba(255,255,255,0.22)"')
+    const light = buildRankingDefaultSvg("#1 Oggi", 60, "rgba(0,0,0,0.80)", "rgba(255,255,255,0.80)", true)
+    expect(light.svg).toContain('stroke="rgba(0,0,0,0.12)"')
+  })
+
   it("keeps the accent flat fill for rs=colored (no satin override)", () => {
     const { svg } = buildRankingDefaultSvg("#2 Film", 60, "#ffffff", "#ff6430", false, "#ff6430")
     expect(svg).toContain('fill="#ff6430"')
@@ -502,6 +544,20 @@ describe("buildExtraDefaultSvg", () => {
   it("locks text to the measured badge width", () => {
     const { svg } = buildExtraDefaultSvg("Vincitore Golden Globe", 60, "rgba(0,0,0,0.80)", "rgba(255,255,255,0.80)")
     expect(svg).toContain('lengthAdjust="spacingAndGlyphs"')
+  })
+
+  it("uses satin gradient with polarized stroke and 3D box shadow by default", () => {
+    const { svg } = buildExtraDefaultSvg("Vincitore Golden Globe", 60, "rgba(0,0,0,0.80)", "rgba(255,255,255,0.80)", false, false)
+    expect(svg).toContain('fill="url(#edg)"')
+    expect(svg).toContain('stroke="rgba(255,255,255,0.22)"')
+    expect(svg).toContain('stroke-width="1.5"')
+    expect(svg).toContain('filter="url(#tds)"')
+  })
+
+  it("keeps the accent flat fill for colored (no satin override)", () => {
+    const { svg } = buildExtraDefaultSvg("Premio", 60, "#ffffff", "#ff6430", false, false, "#ff6430")
+    expect(svg).toContain('fill="#ff6430"')
+    expect(svg).not.toContain('fill="url(#edg)"')
   })
 })
 

@@ -856,12 +856,11 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
 
   const hasQualityBadge = badgeQuality !== false && !!quality
 
-  // Placca staccata: solo gli stili centrati (nastro e barra restano ancorati)
+  // Placca staccata: solo gli stili centrati (il nastro resta ancorato)
   // con offset Y esplicito arrotondano tutti e 4 gli angoli. Calcolato qui
   // (non nel layout sotto) perché entra nella chiave cache: il bitmap cambia.
-  const isRankBarStyle = rankingBadgeStyle === "bar"
   const isRankNetflixRibbonStyle = rankingBadgeStyle === "netflix" && topBadge?.type === "rank"
-  const isRankDetached = !!topBadge && !isRankBarStyle && !isRankNetflixRibbonStyle && topBadgeOffsetY !== 0
+  const isRankDetached = !!topBadge && !isRankNetflixRibbonStyle && topBadgeOffsetY !== 0
 
   const genreBadgeKey = hasGenreBadge
     ? badgeCacheKey("genre", genreName, voteAverage, CW, year, badgeStyle, accentColorGenre, bottomLight, badgeGenre, badgeYear, badgeRating, genreBadgeScale)
@@ -888,10 +887,10 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       ? (cacheGet<{ png: Buffer; w: number; h: number; isRank?: boolean }>(rankBadgeKey)
           || coalesceBadgeRender(rankBadgeKey, () => {
               if (topBadge!.type === "extra") {
-                return renderExtraBadge(topBadge!.label, topBadgePw, topLight, rankingBadgeStyle, accentColorRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100, isRankDetached)
+                return renderExtraBadge(topBadge!.label, topBadgePw, topLight, rankingBadgeStyle, accentColorRank, isRankDetached)
                   .then((r) => { const v = { ...r, isRank: false }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
               }
-              return renderRankingBadge((topBadge as { rank: number }).rank, rankingBadgeStyle === "netflix" ? badgePw : topBadgePw, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, rankingBadgeStyle === "bar" ? topBadgeScale : 100, isRankDetached)
+              return renderRankingBadge((topBadge as { rank: number }).rank, rankingBadgeStyle === "netflix" ? badgePw : topBadgePw, topBadge!.label, topLight, rankingBadgeStyle, accentColorRank, ribbonSide, isAnimeRank, isRankDetached)
                 .then((r) => { const v = { ...r, isRank: true }; cacheSet(rankBadgeKey, v, ["badge"], BADGE_CACHE_TTL); return v })
             }))
       : Promise.resolve(null),
@@ -914,10 +913,10 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   // -----------------------------------------------------------------------
   // 6. Position badges + network logo
   // -----------------------------------------------------------------------
-  // Scale %: resize dei bitmap dopo il render (tutti gli stili TRANNE le
-  // barre, che scalano native via font nel builder per restare full-width),
-  // prima del fit — così fitBadgeToCanvas garantisce comunque il
-  // contenimento nel canvas. B2: 4 await sequenziali → un Promise.all.
+  // Scale %: resize dei bitmap dopo il render (tutti gli stili; la barra
+  // genere scala nativa via font nel builder per restare full-width), prima
+  // del fit — così fitBadgeToCanvas garantisce comunque il contenimento nel
+  // canvas. B2: 4 await sequenziali → un Promise.all.
   // La cache resta valida (chiave senza scala): la scala si applica a valle.
   // Tutta la matematica di posizione/overlap sotto usa già le dimensioni
   // scalate. La posizione del badge genere usa safeGenreBadgeResult.h.
@@ -926,12 +925,10 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       ? (async () => {
           // Landscape: scala % + riduzione -20px in UN solo resize (prima due
           // resize sharp in serie sullo stesso bitmap). Stesse dimensioni
-          // finali del vecchio codice (la scala % salta lo stile bar, lo
-          // shrink -20px no), un solo passaggio di ricampionamento.
+          // finali del vecchio codice, un solo passaggio di ricampionamento.
           if (shape === "landscape") {
-            const isBar = rankingBadgeStyle === "bar"
-            const scaledH = isBar ? rankBadgeResult.h : Math.max(1, Math.round(rankBadgeResult.h * topBadgeScale / 100))
-            const scaledW = isBar ? rankBadgeResult.w : Math.max(1, Math.round(rankBadgeResult.w * topBadgeScale / 100))
+            const scaledH = Math.max(1, Math.round(rankBadgeResult.h * topBadgeScale / 100))
+            const scaledW = Math.max(1, Math.round(rankBadgeResult.w * topBadgeScale / 100))
             const targetH = Math.max(1, scaledH - 20)
             const targetW = Math.max(1, Math.round(scaledW * (targetH / scaledH)))
             if (targetH !== rankBadgeResult.h || targetW !== rankBadgeResult.w) {
@@ -940,7 +937,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
             }
             return rankBadgeResult
           }
-          return topBadgeScale !== 100 && rankingBadgeStyle !== "bar"
+          return topBadgeScale !== 100
             ? await scaleBitmapForLayout(rankBadgeResult, topBadgeScale)
             : rankBadgeResult
         })()
@@ -1013,21 +1010,19 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
   let finalRankLeft: number | null = null
   let finalRankTop = 0
   if (safeRankBadgeResult) {
-    const isBar = rankingBadgeStyle === "bar"
     // Il nastro Netflix è ancorato a sinistra SOLO quando il badge è davvero un
     // ranking "netflix" (type rank). Un badge personalizzato/extra va SEMPRE
     // centrato, anche se lo stile selezionato è "netflix": altrimenti esce
     // decentrato a sinistra.
     const isNetflixRibbon = rankingBadgeStyle === "netflix" && topBadge?.type === "rank"
-    // Offset X/Y solo sui centrati: nastro e barra restano ancorati (per scelta
-    // utente esplicita gli offset non li toccano).
-    const isCentered = !isBar && !isNetflixRibbon
+    // Offset X/Y solo sui centrati: il nastro resta ancorato (per scelta
+    // utente esplicita gli offset non lo toccano).
+    const isCentered = !isNetflixRibbon
+    // La pill centrale è staccata di 10px dal bordo alto (misura fissa decisa
+    // in editor). Default a filo top. Solo pill, indipendente dal badge qualità.
+    const pillTopGap = rankingBadgeStyle === "pill" ? 10 : 0
     let left: number
-    if (isBar) {
-      // Bar full-width in portrait; in landscape è resa a badgePw e va
-      // centrata (stesso lower-third del badge genere).
-      left = shape === "landscape" ? Math.round((CW - safeRankBadgeResult.w) / 2) : 0
-    } else if (isNetflixRibbon && isRightRibbon) {
+    if (isNetflixRibbon && isRightRibbon) {
       left = Math.round(CW - safeRankBadgeResult.w) // nastro Netflix a destra (Stremio)
     } else if (isNetflixRibbon) {
       left = 0 // nastro Netflix a sinistra (Nuvio, default)
@@ -1038,7 +1033,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     }
     finalRankBadge = safeRankBadgeResult
     finalRankLeft = left
-    finalRankTop = isCentered ? topBadgeOffsetY : 0
+    finalRankTop = isCentered ? topBadgeOffsetY + pillTopGap : 0
 
     // Il badge centrale resta invariato — la gestione overlap vive nei blocchi
     // network/qualità qui sotto (shrink dei laterali).
@@ -1081,7 +1076,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       // deterministiche della scala) + UN solo resize — prima ogni step
       // intermedio faceva un resize sharp poi scartato (fino a ~7).
       const shrinkToAvoidRank = async <T extends BadgeRender>(box: T, top: number, left: number): Promise<T> => {
-        if (finalRankBadge && finalRankLeft !== null && rankingBadgeStyle !== "bar") {
+        if (finalRankBadge && finalRankLeft !== null) {
           const rankL = finalRankLeft
           const rankR = finalRankLeft + finalRankBadge.w
           const rankB = finalRankTop + finalRankBadge.h
@@ -1169,8 +1164,12 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
     const isComingSoonRight = showComingSoon && ribbonSide === "right" && !!ribbonLayout
     const isRightRibbonCorner = (isNetflixRight && !!finalRankBadge) || isComingSoonRight
 
-    let top = netBaseTop
-    let left = isRightRibbonCorner ? netPadX : Math.round(CW - safeQualityBadgeResult.w - netPadX)
+    // Ancoraggio base spostato di misura fissa da editor: +10px X, -10px Y
+    // (era -20, alzato di 10 dalla situazione precedente).
+    // Lo stacking sotto il logo network resta invariato (lì conta non
+    // sovrapporsi, non la misura).
+    let top = netBaseTop - 10
+    let left = (isRightRibbonCorner ? netPadX : Math.round(CW - safeQualityBadgeResult.w - netPadX)) + 10
     let finalQualityBadge = safeQualityBadgeResult
 
     if (isRightRibbonCorner) {
@@ -1181,7 +1180,7 @@ export async function generatePosterBuffer(input: GenerationInput): Promise<Buff
       }
     }
 
-    if (finalRankBadge && finalRankLeft !== null && rankingBadgeStyle !== "bar") {
+    if (finalRankBadge && finalRankLeft !== null) {
       const rankL = finalRankLeft
       const rankR = finalRankLeft + finalRankBadge.w
       const rankB = finalRankTop + finalRankBadge.h

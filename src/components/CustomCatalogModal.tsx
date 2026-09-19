@@ -5,6 +5,7 @@ import { X, Plus, ListPlus, Film, Tv, Shuffle, Check, AlertCircle } from "lucide
 import { usePSelector } from "@/lib/context"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { detectCatalogProvider } from "@/lib/custom-catalog-providers"
+import { userFetch } from "@/lib/http"
 import { EmojiPicker } from "@/components/ui"
 import type { CustomCatalogType } from "@/lib/types"
 
@@ -95,7 +96,7 @@ export function CustomCatalogModal({ isOpen, onClose }: CustomCatalogModalProps)
       if (tmdbKey) params.set("api_key", tmdbKey)
       if (mdblistApiKey) params.set("mdblist_key", mdblistApiKey)
 
-      const res = await fetch(`/api/mdblist/custom?${params.toString()}`, {
+      const res = await userFetch(`/api/mdblist/custom?${params.toString()}`, {
         headers: tmdbKey ? { "x-api-key": tmdbKey } : undefined,
         signal: AbortSignal.timeout(8000),
       }).catch(() => null)

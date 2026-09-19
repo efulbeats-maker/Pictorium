@@ -59,7 +59,14 @@ const limits: Record<string, BucketConfig> = {
   // PIN auth: tentativi di brute-force su 4-8 cifre — burst contenuto e
   // refill lento (20 burst, ~2/s sostenuti). La protezione reale viene da
   // PIN min 6 cifre + rotazione sessionSecret a ogni setPin.
-  "auth-pin": { maxTokens: 20, refillRate: 2,  refillWindow: 1000 },
+  "auth-pin": { maxTokens: 20, refillRate: 2, refillWindow: 1000 },
+  // Creazione utenti (multi-user): istanza aperta a chiunque — burst stretto
+  // e refill lento contro lo spam di UUID. Vale anche per GET exists (oracle).
+  "users-create": { maxTokens: 5, refillRate: 1, refillWindow: 60000 },
+  // Password utenti (verify + cambio): scrypt è costoso e le password hanno
+  // poca entropia — burst contenuto e refill lento anti brute-force, su
+  // chiave composita IP+UUID (vedi userRateLimitKey).
+  "users-password": { maxTokens: 10, refillRate: 1, refillWindow: 60000 },
 }
 
 function memoryRateLimit(bucketKey: string, cfg: BucketConfig, now: number): { ok: boolean; retAfter: number } {

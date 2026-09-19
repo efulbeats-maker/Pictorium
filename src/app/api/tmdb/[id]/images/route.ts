@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { getImages } from "@/lib/tmdb"
+import { getImages, resolveRouteApiKey } from "@/lib/tmdb"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { cacheGet, cacheSet } from "@/lib/cache"
 import { jsonGzip } from "@/lib/json-response"
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   // costruito dalla regione. L'italiano che stava qui privilegiava una lingua
   // sola tra le tredici.
   const languages = req.nextUrl.searchParams.get("languages") || "en,null"
-  const apiKey = req.nextUrl.searchParams.get("api_key") || undefined
+  const apiKey = await resolveRouteApiKey(req)
   const cacheKey = `images:${type}:${id}:${languages}`
   const acceptEncoding = req.headers.get("accept-encoding")
   const cached = cacheGet(cacheKey)

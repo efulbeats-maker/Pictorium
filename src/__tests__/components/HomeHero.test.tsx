@@ -125,4 +125,12 @@ describe("HomeStatusStrip", () => {
     expect(screen.getByText("ui.statusTitle")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "ui.statusTitle" })).toHaveAttribute("href", "/status")
   })
+
+  it("preserves user space uuid in status link when in user space", () => {
+    const uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    window.history.replaceState({}, "", `/u/${uuid}/configure`)
+    renderWithCtx(<HomeStatusStrip />)
+    expect(screen.getByRole("link", { name: "ui.statusTitle" })).toHaveAttribute("href", `/status?u=${uuid}`)
+    window.history.replaceState({}, "", "/")
+  })
 })

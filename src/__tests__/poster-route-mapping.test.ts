@@ -8,6 +8,7 @@ import { getDetails, getDetailsWithExternalIds, getImages, getExternalIds } from
 import { getJWRankings } from "@/lib/justwatch"
 import { fetchMDBList } from "@/lib/mdblist"
 import { cacheClear } from "@/lib/cache"
+import { resolveStreamQuality } from "@/lib/stream-quality"
 import { __resetTMDBSessionCache } from "@/lib/tmdb-session-cache"
 import type { Mapping } from "@/lib/types"
 import { fetchCustomRatings } from "@/lib/custom-rating"
@@ -101,6 +102,17 @@ vi.mock("@/lib/tmdb", () => ({
   getExternalIds: vi.fn(async () => ({ imdb_id: null })),
   getKeywords: vi.fn(async () => []),
   resolveRequestApiKey: vi.fn((req: { nextUrl?: { searchParams: URLSearchParams } }) => req.nextUrl?.searchParams.get("api_key") || undefined),
+  // La route risolve le chiavi via resolveUserApiKeys: mock fedele alla
+  // semantica (query api_key), così i test che armano ?api_key= restano validi.
+  resolveUserApiKeys: vi.fn(async (req: { headers: { get: (n: string) => string | null }; nextUrl?: { searchParams: URLSearchParams } }) => {
+    const q = req.nextUrl?.searchParams.get("api_key") || undefined
+    const none = { key: undefined, source: "none" } as const
+    return {
+      tmdb: q ? { key: q, source: "query" } : none,
+      mdblist: none,
+      tvdb: none,
+    }
+  }),
 }))
 
 vi.mock("@/lib/imdb-resolver", () => ({
@@ -1324,6 +1336,90 @@ describe("GET /api/poster/[type]/[id] error and edge cases", () => {
     await GET(reqDe, { params: Promise.resolve({ type: "tv", id: "76479" }) })
 
     expect(mockedGetJWRankings).toHaveBeenCalledWith("SHOW", "DE", 20, undefined, "de-DE", expect.any(AbortSignal))
+  })
+
+  it("serves ephemeral Cache-Control (120s, no immutable) when quality times out", async () => {
+    const posterBuf = await imageBuffer("#101010", 500, 750)
+    mockedGetById.mockResolvedValue(null)
+    mockedGetDetails.mockResolvedValue({
+      id: 42,
+      title: "Test Movie",
+      genres: [{ id: 18, name: "Drama" }],
+      vote_average: 7.5,
+      vote_count: 100,
+      original_language: "en",
+      release_date: "2024-01-15",
+      production_companies: [],
+    })
+    mockedGetImages.mockResolvedValue({
+      id: 42,
+      posters: [
+        { file_path: "/clean.jpg", iso_639_1: null, vote_average: 8.0, vote_count: 100, width: 500, height: 750, aspect_ratio: 0.667 },
+      ],
+      logos: [],
+      backdrops: [],
+    })
+    mockedGetExternalIds.mockResolvedValue({ imdb_id: "tt1234567" })
+    vi.mocked(resolveStreamQuality).mockResolvedValue({ quality: null, status: "timeout", source: "torrentio" })
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(new Uint8Array(posterBuf), {
+        status: 200,
+        headers: { "content-type": "image/png", "content-length": String(posterBuf.length) },
+      }),
+    )
+
+    const req = new NextRequest("http://localhost:3000/api/poster/movie/42")
+    const res = await GET(req, { params: Promise.resolve({ type: "movie", id: "42" }) })
+
+    expect(res.status).toBe(200)
+    const cc = res.headers.get("Cache-Control") ?? ""
+    expect(cc).toContain("max-age=120")
+    expect(cc).not.toContain("immutable")
+    expect(cc).not.toContain("max-age=31536000")
+  })
+
+  it("exposes quality status/source, logo selection and cache state in debug=1", async () => {
+    const posterBuf = await imageBuffer("#101010", 500, 750)
+    mockedGetById.mockResolvedValue(null)
+    mockedGetDetails.mockResolvedValue({
+      id: 42,
+      title: "Test Movie",
+      genres: [{ id: 18, name: "Drama" }],
+      vote_average: 7.5,
+      vote_count: 100,
+      original_language: "en",
+      release_date: "2024-01-15",
+      production_companies: [],
+    })
+    mockedGetImages.mockResolvedValue({
+      id: 42,
+      posters: [
+        { file_path: "/clean.jpg", iso_639_1: null, vote_average: 8.0, vote_count: 100, width: 500, height: 750, aspect_ratio: 0.667 },
+      ],
+      logos: [
+        { file_path: "/logo.png", iso_639_1: "en", vote_average: 0, vote_count: 0, width: 220, height: 80, aspect_ratio: 2.75 },
+      ],
+      backdrops: [],
+    })
+    mockedGetExternalIds.mockResolvedValue({ imdb_id: "tt1234567" })
+    vi.mocked(resolveStreamQuality).mockResolvedValue({ quality: "4K", status: "resolved", source: "torrentio", rawTokens: ["4k"] })
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response(new Uint8Array(posterBuf), {
+        status: 200,
+        headers: { "content-type": "image/png", "content-length": String(posterBuf.length) },
+      }),
+    )
+
+    const req = new NextRequest("http://localhost:3000/api/poster/movie/42?debug=1")
+    const res = await GET(req, { params: Promise.resolve({ type: "movie", id: "42" }) })
+
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.quality).toMatchObject({ value: "4K", source: "torrentio", status: "resolved", rawTokens: ["4k"] })
+    expect(body.logoSelection.requestedLang).toBe("it")
+    expect(body.logoSelection.usedLang).toBe("en")
+    expect(body.cache.hit).toBe(false)
+    expect(body.meta.mappingId).toBeNull()
   })
 })
 

@@ -1,8 +1,7 @@
 import { NextRequest } from "next/server"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { fetchUnifiedCatalogItems, detectCatalogProvider } from "@/lib/custom-catalog-providers"
-import { getDetails, resolveRequestApiKey, tmdbFindByImdb } from "@/lib/tmdb"
-import { envWithFallback } from "@/lib/env-compat"
+import { getDetails, resolveRouteApiKey, tmdbFindByImdb } from "@/lib/tmdb"
 
 export async function GET(req: NextRequest) {
   const rl = await rateLimit(rateLimitKey(req), "tmdb")
@@ -11,8 +10,8 @@ export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get("url")
   if (!url) return Response.json({ items: [] })
 
-  const apiKey = resolveRequestApiKey(req) || envWithFallback("TMDB_KEY") || process.env.TMDB_KEY || process.env.TMDB_API_KEY || undefined
-  const mdblistKey = req.nextUrl.searchParams.get("mdblist_key") || envWithFallback("MDBLIST_KEY") || process.env.MDBLIST_KEY || process.env.MDBLIST_API_KEY || undefined
+  const apiKey = await resolveRouteApiKey(req)
+  const mdblistKey = await resolveRouteApiKey(req, "mdblist")
 
   try {
     const detection = detectCatalogProvider(url)

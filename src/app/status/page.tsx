@@ -5,6 +5,7 @@ import Link from "next/link"
 import { RefreshCw } from "lucide-react"
 import { t, getLang, setLang } from "@/lib/i18n"
 import { APP_COMMIT, APP_VERSION } from "@/generated/app-version"
+import { currentPathUuid, userAuthHeaders } from "@/lib/user-token"
 
 interface CheckResult {
   ok: boolean
@@ -141,15 +142,26 @@ export default function StatusPage() {
     }
   }
 
+  const [uuid, setUuid] = useState<string | null>(null)
+  useEffect(() => {
+    const id = currentPathUuid() || (typeof window !== "undefined" ? window.sessionStorage?.getItem("pictorium_active_space") : null)
+    if (id) setUuid(id)
+  }, [])
+
   const loadHealth = useCallback(async () => {
-    // La chiave TMDB è personale (localStorage) e la route /api/health la
-    // accetta SOLO via header x-api-key: senza, tutti i check rispondono 401
-    // e la pagina mostrerebbe punti rossi anche a servizi sani.
+    // Risolve la chiave TMDB: priorità a localStorage (single-user / override),
+    // poi allo spazio personale attivo (?u= + x-user-token/password) risolto da /api/health.
+    const id = currentPathUuid() || (typeof window !== "undefined" ? window.sessionStorage?.getItem("pictorium_active_space") : null)
     const key = typeof window !== "undefined" ? (localStorage.getItem("tmdb_key") || "") : ""
+    const headers: Record<string, string> = {}
+    if (key) headers["x-api-key"] = key
+    if (id) Object.assign(headers, userAuthHeaders(id))
+    const url = id ? `/api/health?u=${encodeURIComponent(id)}` : "/api/health"
+
     setLoading(true)
     setError("")
     try {
-      const r = await fetch("/api/health", { headers: key ? { "x-api-key": key } : undefined })
+      const r = await fetch(url, { headers: Object.keys(headers).length > 0 ? headers : undefined })
       if (!r.ok && r.status !== 503) throw new Error("Errore " + r.status)
       const d = await r.json()
       setData(d)
@@ -192,16 +204,23 @@ export default function StatusPage() {
     return () => clearInterval(timer)
   }, [autoRefresh])
 
+  const backHref = uuid ? `/u/${encodeURIComponent(uuid)}/configure` : "/"
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-2xl mx-auto px-4 py-8">
-        <Link href="/" className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-accent transition-colors mb-6">{t("ui.statusBack")}</Link>
+        <Link href={backHref} className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-accent transition-colors mb-6">{t("ui.statusBack")}</Link>
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold mb-1">{t("ui.statusTitle")}</h1>
             <p className="text-xs text-zinc-500 font-mono" data-testid="status-build">
               v{APP_VERSION} · {APP_COMMIT}
             </p>
+            {uuid && (
+              <p className="text-[11px] text-zinc-400 mt-1 font-mono">
+                <span className="text-zinc-500">Spazio:</span> {uuid.slice(0, 8)}…
+              </p>
+            )}
           </div>
           <button
             type="button"

@@ -1,3 +1,4 @@
+import crypto from "node:crypto"
 import { envWithFallback } from "@/lib/env-compat"
 
 interface CacheEntry<T> {
@@ -328,6 +329,32 @@ export function cacheInvalidatePosterData(): void {
 export function cacheInvalidatePosterDataFor(type: string, tmdbId: number): void {
   const mappingTag = `poster:${type}:${tmdbId}`
   cacheInvalidate(mappingTag)
+}
+
+/**
+ * Come sopra ma solo per il namespace utente (multi-user): il save di A non
+ * invalida i poster cachati di B. Il tag deve coincidere con quello scritto
+ * dalla poster route (`poster:${type}:${id}:u<hash>`): l'UUID viaggia solo
+ * come md5-8, mai in chiaro nei tag (stessa forma della cache key poster).
+ */
+export function cacheInvalidatePosterDataForUser(type: string, tmdbId: number, userId: string): void {
+  cacheInvalidate(`poster:${type}:${tmdbId}:${userTagFragment(userId)}`)
+}
+
+/** Frammento tag/cache per-namespace: md5-8 dell'UUID, mai l'UUID in chiaro. */
+export function userTagFragment(userId: string): string {
+  return `u${crypto.createHash("md5").update(userId).digest("hex").slice(0, 8)}`
+}
+
+/**
+ * Frammento utente per le CACHE KEY (catalog/meta/poster): sha256-16, mai
+ * l'UUID in chiaro. I vecchi 32-bit collidono al ~1% già a 10k utenti
+ * (birthday bound) e una collisione serve a B il render cachato di A
+ * (mapping/default altrui = leak visivo). I tag restano a userTagFragment
+ * (lì una collisione causa solo over-invalidazione, direzione sicura).
+ */
+export function hashUserFragment(userId: string): string {
+  return crypto.createHash("sha256").update(userId).digest("hex").slice(0, 16)
 }
 
 export function cacheStatus(): CacheStatus {

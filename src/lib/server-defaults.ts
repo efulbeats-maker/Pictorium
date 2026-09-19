@@ -296,3 +296,134 @@ export async function setServerDefaults(d: ServerDefaults): Promise<void> {
   })()
   await writeQueue
 }
+
+// ── Defaults per-utente (multi-user, slice 1) ─────────────────────────────
+// `getServerDefaults()` sopra resta SINCRONA e invariata (hot path poster).
+// Il namespace utente vive qui: LRU con cap + TTL, miss = fetch reale con
+// attesa (mai fallback inventato). Isolamento stretto: i defaults salvati
+// GLOBALI non entrano nell'effettivo utente (solo ENV_DEFAULTS + salvato
+// utente) — altrimenti un cambio globale toccherebbe i poster altrui.
+
+function userDefaultsFile(userId: string): string {
+  return path.join(DATA_DIR, "users", userId, "defaults.json")
+}
+
+function userDefaultsKvKey(userId: string): string {
+  return `defaults:${userId}`
+}
+
+function assertValidUserId(userId: string): void {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("Invalid user id")
+}
+
+const USER_DEFAULTS_TTL_MS = 5 * 60 * 1000
+const USER_DEFAULTS_CAP = 500
+
+const userDefaultsCache = new Map<string, { defaults: ServerDefaults; at: number }>()
+const userDefaultsQueues = new Map<string, Promise<void>>()
+
+function userDefaultsCacheGet(userId: string): ServerDefaults | null {
+  const hit = userDefaultsCache.get(userId)
+  if (!hit) return null
+  if (Date.now() - hit.at >= USER_DEFAULTS_TTL_MS) {
+    userDefaultsCache.delete(userId)
+    return null
+  }
+  // Promote LRU.
+  userDefaultsCache.delete(userId)
+  userDefaultsCache.set(userId, hit)
+  return hit.defaults
+}
+
+function userDefaultsCacheSet(userId: string, defaults: ServerDefaults): void {
+  if (userDefaultsCache.size >= USER_DEFAULTS_CAP) {
+    const oldest = userDefaultsCache.keys().next().value
+    if (oldest !== undefined) userDefaultsCache.delete(oldest)
+  }
+  userDefaultsCache.set(userId, { defaults: { ...defaults }, at: Date.now() })
+}
+
+async function loadUserDefaults(userId: string): Promise<ServerDefaults> {
+  if (useKv) {
+    try {
+      const { kv } = await import("@vercel/kv")
+      const raw = await kv.get<ServerDefaults>(userDefaultsKvKey(userId))
+      return raw ?? {}
+    } catch (error) {
+      logDefaultsError("failed to load user defaults (KV)", error)
+      return {}
+    }
+  }
+  try {
+    const raw = await fs.readFile(userDefaultsFile(userId), "utf-8")
+    return JSON.parse(raw) as ServerDefaults
+  } catch (error: unknown) {
+    if (!(error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
+      logDefaultsError("failed to load user defaults", error)
+    }
+    return {}
+  }
+}
+
+/**
+ * Defaults SALVATI del namespace, senza ENV d'istanza. Serve ai merge di PUT:
+ * fondere sul merge effettivo (ENV + salvato) cuocerebbe i valori env nel file
+ * utente, e un successivo cambio env dell'operatore non avrebbe più effetto
+ * per quell'utente (shadowing implicito mai scelto). Lettura effettiva resta
+ * getServerDefaultsForUser (ENV + questi).
+ */
+export async function getStoredUserDefaults(userId: string | null | undefined): Promise<ServerDefaults> {
+  if (!userId) return {}
+  assertValidUserId(userId)
+  const hit = userDefaultsCacheGet(userId)
+  // La cache contiene il raw caricato (mai ENV): copia difensiva.
+  if (hit) return { ...hit }
+  return loadUserDefaults(userId)
+}
+
+/**
+ * Defaults effettivi di un namespace: ENV d'istanza + salvato utente.
+ * `userId` null = path globale (wrapper di getServerDefaults, per i caller).
+ */
+export async function getServerDefaultsForUser(userId: string | null | undefined): Promise<ServerDefaults> {
+  if (!userId) return getServerDefaults()
+  assertValidUserId(userId)
+  const hit = userDefaultsCacheGet(userId)
+  if (hit) return { ...ENV_DEFAULTS, ...hit }
+  const loaded = await loadUserDefaults(userId)
+  userDefaultsCacheSet(userId, loaded)
+  return { ...ENV_DEFAULTS, ...loaded }
+}
+
+export async function setServerDefaultsForUser(userId: string, d: ServerDefaults): Promise<void> {
+  assertValidUserId(userId)
+  if (useKv) {
+    try {
+      const { kv } = await import("@vercel/kv")
+      await kv.set(userDefaultsKvKey(userId), d)
+      userDefaultsCacheSet(userId, d)
+    } catch (error) {
+      logDefaultsError("failed to write user defaults (KV)", error)
+      throw error
+    }
+    return
+  }
+  const existing = userDefaultsQueues.get(userId) ?? Promise.resolve()
+  const run = existing.then(async () => {
+    try {
+      await fs.mkdir(path.dirname(userDefaultsFile(userId)), { recursive: true })
+      await fs.writeFile(userDefaultsFile(userId), JSON.stringify(d, null, 2))
+      userDefaultsCacheSet(userId, d)
+    } catch (error) {
+      logDefaultsError("failed to write user defaults", error)
+      throw error
+    }
+  })
+  userDefaultsQueues.set(userId, run.catch(() => {}))
+  await run
+}
+
+/** Evict della cache defaults del namespace (wipe account). Solo test + user-activity. */
+export function __evictUserDefaultsCache(userId: string): void {
+  userDefaultsCache.delete(userId)
+}

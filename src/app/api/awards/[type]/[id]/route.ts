@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server"
 import { fetchAllWikidata, directorBadgeLabel } from "@/lib/awards"
 import { createT } from "@/lib/i18n"
-import { getKeywords } from "@/lib/tmdb"
+import { getKeywords, resolveRouteApiKey } from "@/lib/tmdb"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { createLogger } from "@/lib/logger"
 
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   if (!Number.isInteger(tmdbId) || tmdbId <= 0) {
     return Response.json({ awards: [], nominations: [], studios: [], keywords: [] })
   }
-  const apiKey = req.nextUrl.searchParams.get("api_key") || undefined
+  const apiKey = await resolveRouteApiKey(req)
   // Fix L10: try/catch — prima un throw di fetchAllWikidata/getKeywords
   // (outage upstream) cascava in un 500 generico.
   try {

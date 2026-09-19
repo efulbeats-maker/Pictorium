@@ -3,6 +3,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { createPortal } from "react-dom"
 import { usePSelector } from "@/lib/context"
+import { currentPathUuid, USER_UNLOCK_EVENT } from "@/lib/user-token"
+import { isMultiUserServer } from "@/lib/guest-guard"
+import { UserSpacesList } from "@/components/UserSpaceSection"
 import { useT } from "@/lib/contexts/TranslationContext"
 import { usePosterEditor } from "@/lib/contexts/PosterEditorContext"
 import type { TMDBImage } from "@/lib/types"
@@ -13,6 +16,7 @@ import { LogoOptions } from "@/components/LogoOptions"
 import { EditorPanel } from "@/components/EditorPanel"
 import { buildPreviewUrl } from "@/lib/poster-url"
 import { copyText } from "@/lib/clipboard"
+import { userFetch } from "@/lib/http"
 import { SearchBar } from "@/components/SearchBar"
 import { PosterCarousel } from "@/components/PosterCarousel"
 import { ScrollReveal } from "@/components/ScrollReveal"
@@ -66,6 +70,9 @@ export default function EditView() {
   // solo quando mancano entrambe si mostra il pannello di benvenuto.
   const hasTmdbKey = !!tmdbKey || serverHasTmdbKey
   const tvdbApiKey = usePSelector((v) => v.tvdbApiKey)
+  const serverKeyStatus = usePSelector((v) => v.serverKeyStatus)
+  // Chiave TVDB effettiva = device oppure namespace (risolta dal server via ?u=).
+  const hasTvdbKey = !!tvdbApiKey || !!serverKeyStatus?.tvdb
   const topEdgeColor = usePSelector((v) => v.topEdgeColor)
   const bottomEdgeColor = usePSelector((v) => v.bottomEdgeColor)
   const trendRank = usePSelector((v) => v.trendRank)
@@ -79,6 +86,32 @@ export default function EditView() {
   const urlCopiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [mobileSection, setMobileSection] = useState<"poster" | "preview" | "customize">("preview")
   const [activeRightTab, setActiveRightTab] = useState<"logo" | "badge" | "transform" | "stagioni">("logo")
+  // Gate profili stile AIO: con multi-user attivo e senza UUID nel path, la
+  // home diventa creazione/selezione spazio — ricerca ed editor restano
+  // bloccati finché non apri il tuo spazio (/u/<uuid>/configure). Il gate
+  // NON dipende da `selected`: una selezione arrivata da altre viste
+  // (Cataloghi, I Miei Poster) non deve sbloccare l'editor da sola.
+  const [pathUuid, setPathUuid] = useState<string | null>(null)
+  const [multiUserOn, setMultiUserOn] = useState(false)
+  useEffect(() => {
+    // Risincronizza a ogni unlock/popstate: back/forward e SPA che riusano
+    // l'albero lascerebbero il gate su un path vecchio (bloccato per sempre
+    // fino al refresh).
+    const syncPath = () => setPathUuid(currentPathUuid())
+    syncPath()
+    let live = true
+    isMultiUserServer()
+      .then((v) => { if (live) setMultiUserOn(v) })
+      .catch(() => { if (live) setMultiUserOn(false) })
+    window.addEventListener(USER_UNLOCK_EVENT, syncPath)
+    window.addEventListener("popstate", syncPath)
+    return () => {
+      live = false
+      window.removeEventListener(USER_UNLOCK_EVENT, syncPath)
+      window.removeEventListener("popstate", syncPath)
+    }
+  }, [])
+  const profileGate = multiUserOn && !pathUuid
   const [activePosterTab, setActivePosterTab] = useState("clean")
   const [testUrl, setTestUrl] = useState<string | null>(null)
   const [urlCopied, setUrlCopied] = useState(false)
@@ -248,7 +281,7 @@ export default function EditView() {
   const selectedImdbId = selected?.imdb_id
   const selectedMediaType = selected?.media_type
   useEffect(() => {
-    if (selectedMediaType !== "tv" || !tvdbApiKey) {
+    if (selectedMediaType !== "tv" || !hasTvdbKey) {
       setTvdbId(null)
       return
     }
@@ -256,7 +289,7 @@ export default function EditView() {
     const candidates = [selectedImdbId, String(selectedId)].filter(Boolean) as string[]
     const fetchTvdbId = async (cid: string) => {
       try {
-        const res = await fetch(`/api/tvdb/${encodeURIComponent(cid)}/seasonTypes?tvdb_key=${encodeURIComponent(tvdbApiKey)}&tmdb_key=${encodeURIComponent(tmdbKey || "")}`, {
+        const res = await userFetch(`/api/tvdb/${encodeURIComponent(cid)}/seasonTypes?tvdb_key=${encodeURIComponent(tvdbApiKey)}&tmdb_key=${encodeURIComponent(tmdbKey || "")}`, {
           headers: { "x-api-key": tvdbApiKey, "x-tmdb-key": tmdbKey || "" },
         })
         const d = await res.json().catch(() => ({}))
@@ -273,7 +306,7 @@ export default function EditView() {
       if (active) setTvdbId(null)
     })()
     return () => { active = false }
-  }, [selectedId, selectedImdbId, selectedMediaType, tvdbApiKey, tmdbKey])
+  }, [selectedId, selectedImdbId, selectedMediaType, hasTvdbKey, tvdbApiKey, tmdbKey])
 
   const cleanPoster = previewPoster?.iso_639_1 === null
   const isLandscape = ed.posterShape === "landscape"
@@ -300,7 +333,7 @@ export default function EditView() {
 
   return (
     <div>
-      {selected && (
+      {selected && !profileGate && (
         <div className="flex flex-col items-center w-full">
           {/* Desktop Header */}
           <header className="hidden lg:flex w-full px-4 md:px-6 -mt-1 md:-mt-4 mb-3 flex-col items-center">
@@ -607,12 +640,22 @@ export default function EditView() {
           </div>
         </div>
       )}
-      {!selected && (
+      {profileGate && (
+        <div className="max-w-md mx-auto mt-16 mb-16 animate-fade-scale-in-hero">
+          <div className="text-center mb-5">
+            <div className="mb-4"><span className="hero-kicker">{t("ui.profileGateKicker")}</span></div>
+            <h2 className="text-lg font-bold text-zinc-100 mb-2">{t("ui.profileGateTitle")}</h2>
+            <p className="text-sm text-muted leading-relaxed">{t("ui.profileGateDesc")}</p>
+          </div>
+          <UserSpacesList />
+        </div>
+      )}
+      {!selected && !profileGate && (
         <div>
           {searchBar}
         </div>
       )}
-      {!selected && !hasTmdbKey && (
+      {!selected && !profileGate && !hasTmdbKey && (
         <div className="max-w-md mx-auto mt-16 mb-16">
           <div className="glass-panel relative overflow-hidden p-8 flex flex-col items-center text-center animate-fade-scale-in-hero">
             <div className="welcome-accent" />
@@ -660,7 +703,7 @@ export default function EditView() {
           </div>
         </div>
       )}
-      {!selected && hasTmdbKey && (
+      {!selected && !profileGate && hasTmdbKey && (
         <>
           <HomeHero />
           <ScrollReveal animation="fade-up" threshold={0.05}>

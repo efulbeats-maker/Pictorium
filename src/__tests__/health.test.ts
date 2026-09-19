@@ -88,4 +88,29 @@ describe("GET /api/health", () => {
     expect(json.storage.mappingCount).toBe(2)
     expect(json.storage.lastMappingUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
+
+  it("resolves tmdb key from user namespace (?u=) via resolveRouteApiKey", async () => {
+    const crypto = await import("node:crypto")
+    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "pictorium-health-ns-"))
+    process.env.PICTORIUM_DATA_DIR = tempDir
+    process.env.PICTORIUM_MULTI_USER = "1"
+    process.env.PROFILE_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex")
+    vi.resetModules()
+
+    const { createUser } = await import("@/lib/user-auth")
+    const { setUserKeys } = await import("@/lib/user-keys")
+    const user = await createUser("password123")
+    await setUserKeys(user.uuid, { tmdb: "user-tmdb-key-12345" })
+
+    const tmdb = await import("@/lib/tmdb")
+    vi.spyOn(tmdb, "checkTmdbEndpoint").mockResolvedValue({ ok: true, status: 200, time: 10 })
+
+    const { GET } = await import("@/app/api/health/route")
+    const req = new Request(`http://localhost:3000/api/health?u=${user.uuid}`)
+    const res = await GET(req)
+    const json = await res.json()
+
+    expect(json.tmdb.apiKey).toBe(true)
+    expect(json.status).toBe("healthy")
+  })
 })

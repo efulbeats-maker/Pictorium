@@ -9,6 +9,13 @@ import * as cacheModule from "@/lib/cache"
 vi.mock("@/lib/tmdb", () => ({
   getDetails: vi.fn(),
   getExternalIds: vi.fn(),
+  // La route risolve la chiave via helper (query > namespace > env): qui
+  // basta l'equivalente query-only per kind, la risoluzione namespace è
+  // coperta da namespace-keys.test.ts.
+  resolveRouteApiKey: vi.fn(async (req: Request, kind?: string) => {
+    const q = new URL(req.url).searchParams
+    return (kind === "mdblist" ? q.get("mdblist_key") : q.get("api_key")) || undefined
+  }),
 }))
 vi.mock("@/lib/ratings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/ratings")>()

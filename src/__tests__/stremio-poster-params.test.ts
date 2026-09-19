@@ -12,7 +12,7 @@ describe("buildStremioPosterSearchParams", () => {
       globalBadges: false,
       rankingBadges: false,
       badgeStyle: "pill",
-      rankingBadgeStyle: "bar",
+      rankingBadgeStyle: "pill",
       gradientHeight: 42,
       blurIntensity: 6,
       blurFade: 55,
@@ -31,7 +31,7 @@ describe("buildStremioPosterSearchParams", () => {
     expect(params.get("bf")).toBe("55")
     expect(params.get("bd")).toBe("35")
     expect(params.get("bs")).toBe("pill")
-    expect(params.get("rs")).toBe("bar")
+    expect(params.get("rs")).toBe("pill")
     expect(params.get("rv")).toBe(String(POSTER_URL_VERSION))
   })
 

@@ -1,8 +1,9 @@
 import { NextRequest } from "next/server"
-import { getServerDefaults, setServerDefaults, type ServerDefaults } from "@/lib/server-defaults"
+import { getServerDefaults, setServerDefaults, getServerDefaultsForUser, getStoredUserDefaults, setServerDefaultsForUser, type ServerDefaults } from "@/lib/server-defaults"
 import { cacheInvalidatePosterData } from "@/lib/cache"
 import { bumpCatalogEpoch } from "@/lib/catalog-epoch"
 import { checkAdminToken, requireAdminToken, isSameOrigin, adminAuthResponse, originMismatchResponse } from "@/lib/auth"
+import { checkUserAuth, getScopedUserId, extractUserParam, invalidUserResponse, isMultiUserEnabled, userAuthResponse, userRateLimitKey } from "@/lib/user-auth"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
 import { getWarmupCatalogs } from "@/lib/catalog-definitions"
 import { createLogger } from "@/lib/logger"
@@ -83,6 +84,20 @@ const defaultsSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
+  const rawUser = extractUserParam(req)
+  const rawInvalid = !!rawUser && isMultiUserEnabled() && !getScopedUserId(rawUser)
+  const scoped = getScopedUserId(rawUser)
+  // Rate-limit come il PUT (prima era senza: oracolo password + scrypt senza
+  // alcun freno oltre al fail limiter centrale).
+  const rl = await rateLimit(rawInvalid ? rateLimitKey(req) : (scoped ? userRateLimitKey(req, scoped) : rateLimitKey(req)), "defaults")
+  if (!rl.ok) return rateLimitResponse(rl.retAfter)
+  if (rawInvalid) return invalidUserResponse()
+  if (scoped) {
+    if (!(await checkUserAuth(req, scoped))) return userAuthResponse()
+    // Namespace: effettivo utente, mai serverKeys (slice 2 per le chiavi).
+    const d = await getServerDefaultsForUser(scoped)
+    return Response.json({ ...d })
+  }
   const d = getServerDefaults()
   // Flag pubblici (solo booleani): dicono al client se l'istanza ha chiavi
   // env, così la welcome screen appare solo quando non c'è chiave da nessuna
@@ -109,10 +124,19 @@ export async function GET(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
-  const rl = await rateLimit(rateLimitKey(req), "defaults")
+  const rawUser = extractUserParam(req)
+  const rawInvalid = !!rawUser && isMultiUserEnabled() && !getScopedUserId(rawUser)
+  const scoped = getScopedUserId(rawUser)
+  const rl = await rateLimit(rawInvalid ? rateLimitKey(req) : (scoped ? userRateLimitKey(req, scoped) : rateLimitKey(req)), "defaults")
   if (!rl.ok) return rateLimitResponse(rl.retAfter)
-  if (!checkAdminToken(req)) return adminAuthResponse()
-  if (!isSameOrigin(req)) return originMismatchResponse()
+  if (rawInvalid) return invalidUserResponse()
+  if (scoped) {
+    if (!(await checkUserAuth(req, scoped))) return userAuthResponse()
+    if (!isSameOrigin(req)) return originMismatchResponse()
+  } else {
+    if (!checkAdminToken(req)) return adminAuthResponse()
+    if (!isSameOrigin(req)) return originMismatchResponse()
+  }
   let body: unknown
   try {
     body = await readJsonBody(req, DEFAULT_MAX_BODY_BYTES)
@@ -125,6 +149,17 @@ export async function PUT(req: NextRequest) {
     return Response.json({ error: "Validation failed", details: parsed.error.flatten() }, { status: 400 })
   }
   try {
+    if (scoped) {
+      // Merge sullo STORATO (mai sull'effettivo ENV+storato): l'env resta
+      // dinamica, nel file finiscono solo scelte dell'utente.
+      const stored = await getStoredUserDefaults(scoped)
+      const next: Record<string, unknown> = { ...stored, ...parsed.data }
+      await setServerDefaultsForUser(scoped, next as ServerDefaults)
+      // Il cambio defaults ruota le chiavi catalogo/meta del namespace via
+      // epoch utente — niente wipe globale (il save di A non tocca B).
+      await bumpCatalogEpoch(scoped)
+      return Response.json({ ok: true })
+    }
     const current = getServerDefaults()
     // Merge invece di replace: un payload parziale NON deve azzerare i default
     // già salvati (altrimenti salvare un solo campo cancellerebbe gli altri).

@@ -275,6 +275,10 @@ echo "PICTORIUM_PUBLIC_INSTANCE=1" > .env
 echo "PICTORIUM_TMDB_KEY=la_tua_chiave" >> .env
 sudo docker compose up -d
 ```
+> [!TIP]
+> **Persistenza dati**: È già attiva di default tramite il volume Docker `posterium-data`. Se preferisci salvare i dati direttamente in una cartella locale sulla macchina host, modifica il volume in `docker-compose.yml` in `./data:/data`.
+>
+> **Privata vs Pubblica**: `PICTORIUM_PUBLIC_INSTANCE=1` lascia l'editor accessibile senza richiedere token admin. Per un'istanza privata protetta, imposta `PICTORIUM_PUBLIC_INSTANCE=0` e aggiungi `PICTORIUM_ADMIN_TOKEN=il_tuo_token_segreto` (oppure usa `PICTORIUM_MULTI_USER=1` per spazi personali isolati e protetti da password).
 
 #### 🖥️ VPS + Caddy (HTTPS Automatico)
 ```caddyfile
@@ -302,13 +306,29 @@ npm install --ignore-scripts && npm run build && npm start
 
 | Variabile | Default | Descrizione |
 |---|:---:|---|
-| `PICTORIUM_PUBLIC_INSTANCE` | `0` | Imposta a `1` su Vercel/HF per consentire il salvataggio dei poster e l'uso dell'editor senza token admin. |
+| `PICTORIUM_PUBLIC_INSTANCE` | `0` | Se `1`, consente l'uso dell'editor e il salvataggio dei poster senza richiedere un token admin. Consigliato per Homelab/LAN o istanze senza restrizioni. |
+| `PICTORIUM_ADMIN_TOKEN` | *(opzionale)* | Token segreto per proteggere l'editor quando `PUBLIC_INSTANCE=0` (header `x-admin-token` o `Bearer`). |
 | `PICTORIUM_TMDB_KEY` | *(opzionale)* | Chiave API TMDB d'istanza per generare poster e cataloghi senza doverla inserire nei client. |
 | `PICTORIUM_TVDB_API_KEY` | *(opzionale)* | Chiave TheTVDB per ordinamenti stagioni alternativi e descrizioni episodi. |
 | `PICTORIUM_MDBLIST_KEY` | *(opzionale)* | Chiave MDBList per liste personalizzate e cataloghi anime. |
 | `PICTORIUM_REGION` | `IT` | Paese delle classifiche JustWatch/FlixPatrol e lingua dei titoli (`IT`, `US`, `GB`, `FR`, `DE`, `ES`, `MX`, `IL`, `JP`, `KR`, `BR`, `IN`, `CA`, `AU`, `CZ`). Overridabile per-richiesta con `?region=` e per-utente via config-token/default salvati. |
-| `PICTORIUM_DATA_DIR` | `./data` | Cartella di persistenza su disco per database e file salvati. |
+| `PICTORIUM_DATA_DIR` | `./data` | Cartella di persistenza su disco per database e file salvati (in Docker già montata su `/data`). |
 | `KV_REST_API_URL` / `TOKEN` | *(vuoto)* | Parametri di connessione Upstash Redis per deploy serverless su Vercel. |
+
+### Multi-utente (istanze pubbliche)
+
+Con `PICTORIUM_MULTI_USER=1` ogni utente ha un UUID personale (`POST /api/users` → `{ uuid, secret }`, secret mostrato una sola volta, password obbligatoria min 8) con mapping, default e chiavi API isolati. Senza flag tutto resta single-user invariato.
+
+| Variabile | Default | Descrizione |
+|---|:---:|---|
+| `PICTORIUM_MULTI_USER` | `0` | `1` = store namespaced per UUID (gestione su `/u/<uuid>/configure`). |
+| `PROFILE_ENCRYPTION_KEY` | *(vuoto)* | **Obbligatoria** con `MULTI_USER=1` per salvare chiavi per-utente (AES-256-GCM, genera con `openssl rand -hex 32`). Senza, il salvataggio chiavi è rifiutato fail-closed (503), mai in chiaro. |
+| `PICTORIUM_MAX_MAPPINGS_PER_USER` | `500` | Quota poster salvabili per UUID (`413` oltre soglia). |
+| `PICTORIUM_MAX_USERS` | *(illimitato)* | Cap anti-Sybil sui namespace (`429` oltre soglia, es. `1000` su istanza pubblica). |
+| `PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK` | `0` | `1` = le richieste scoped (`?u=`) possono usare le chiavi d'istanza. Default `0`: solo chiavi esplicite/namespace (mai open-proxy sulla quota dell'operatore); le richieste globali senza UUID tengono il fallback storico. |
+| `PICTORIUM_USER_RETENTION_DAYS` | `180` | Cleanup namespace inattivi via `POST /api/users/cleanup` (solo admin); `0` = mai. Aggregati in `GET /api/status`. |
+
+Flusso utente (stile AIOmetadata, zero auto-login): la home (`/` e `/configure`) è il gate — crei uno spazio (password obbligatoria, min 8) e vedi UUID + secret di recupero (una volta sola), oppure entri con UUID + password esistenti; ricerca ed editor restano bloccati finché non apri il tuo spazio su `/u/<uuid>/configure` (il namespace nasce vuoto e isolato; chi migra da single-user lancia `POST /api/users/:uuid/import-global` autenticato). La password vive solo in memoria di sessione, il secret resta sul dispositivo (sezione UUID nelle impostazioni, sempre copiabile); ma da soli non bastano mai: a ogni refresh serve un nuovo sblocco di sessione (password o secret ridigitati) — il browser non ti tiene dentro, rientri solo così o via pulsante "modifica config" di Stremio/Nuvio (l'icona chiave in alto apre le impostazioni UUID o il login). Il link di gestione `/u/<uuid>/configure#key=<secret>` usa l'hash fragment (mai in HTTP/log, mai salvato) come recovery di sessione. Il template AIO emette `u=` e omette `api_key` quando il namespace ha chiavi server-side (il server risolve da namespace). Secret compromesso → `POST /api/users/:uuid/rotate` (nuovo secret una volta sola, vecchio revocato subito); chi perde secret e password ricrea l'UUID (nessun reset server-side); cancellazione account via `DELETE /api/users/:uuid` (GDPR). Con flag ON la sezione PIN delle impostazioni è nascosta e il lucchetto PIN non mura gli spazi (lì il cancello è la password): l'admin d'istanza resta `ADMIN_TOKEN`, il backend non cambia. Su `/u/<uuid>/...` il path vince sempre: `?u=` divergente o path non-UUID → `400`. Tentativi password oltre 5 fallimenti/5min per IP+UUID vengono rifiutati senza scrypt (i successi azzerano: l'autosave legittimo non è mai limitato). Nota quota: con flag ON le richieste scoped non usano mai le chiavi d'istanza (salvo opt-in sopra) — senza chiavi nel namespace i cataloghi rispondono vuoti invece di bruciare la quota dell'operatore.
 
 ---
 

@@ -62,12 +62,12 @@ describe("qmin — soglia minima qualità streaming", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     // Prima richiesta con qmin=4K: badge soppresso…
-    const raw = await resolveStreamQuality("movie", "tt999")
+    const raw = (await resolveStreamQuality("movie", "tt999")).quality
     expect(raw).toBe("FHD")
     expect(applyMinQuality(raw, "4K")).toBeNull()
 
     // …ma la seconda richiesta (qmin=SD) vede ancora FHD con ZERO nuove fetch.
-    const raw2 = await resolveStreamQuality("movie", "tt999")
+    const raw2 = (await resolveStreamQuality("movie", "tt999")).quality
     expect(raw2).toBe("FHD")
     expect(applyMinQuality(raw2, "SD")).toBe("FHD")
     expect(fetchMock).toHaveBeenCalledTimes(1)

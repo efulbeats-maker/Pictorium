@@ -253,13 +253,21 @@ export function posterResponse(payload: PosterCachePayload, immutable: boolean, 
   })
 }
 
-export function readCachedPoster(cacheKey: string): { readonly payload: PosterCachePayload | null; readonly stale: boolean } {
+export interface PosterHeadersRecord {
+  readonly etag: string
+  readonly ttlSec?: number
+  readonly immutable?: boolean
+}
+
+export function readCachedPoster(cacheKey: string): { readonly payload: PosterCachePayload | null; readonly stale: boolean; readonly ttlSec?: number; readonly immutable?: boolean } {
   const cached = cacheGetStale<Buffer>(cacheKey)
-  const cachedHeaders = cacheGetStale<{ etag: string }>(`${cacheKey}:headers`)
+  const cachedHeaders = cacheGetStale<PosterHeadersRecord>(`${cacheKey}:headers`)
   if (!cached.data || !cachedHeaders.data) return { payload: null, stale: false }
   return {
     payload: { buffer: cached.data, etag: cachedHeaders.data.etag },
     stale: cached.stale || cachedHeaders.stale,
+    ttlSec: cachedHeaders.data.ttlSec,
+    immutable: cachedHeaders.data.immutable,
   }
 }
 
@@ -273,15 +281,32 @@ export function readCachedPoster(cacheKey: string): { readonly payload: PosterCa
 // header dynamic derivano dallo stesso dynamicPosterTtlSec, così header e
 // storage restano sincronizzati.
 
-export function writeCachedPoster(cacheKey: string, payload: PosterCachePayload, mappingTag?: string): void {
+export interface WriteCachedPosterOpts {
+  /** TTL esplicito in ms (es. qualità effimera): vince su default mapping/dinamico. */
+  readonly ttlMs?: number
+  /** Flag immutable effettivo della risposta: persistito per le HIT (M3). */
+  readonly immutable?: boolean
+}
+
+export function writeCachedPoster(cacheKey: string, payload: PosterCachePayload, mappingTag?: string, opts?: WriteCachedPosterOpts): void {
   const tags = mappingTag ? ["poster", mappingTag] : ["poster"]
   // TTL esplicito solo per i non-mappati: per i mappati resta il refresh
   // schedulato giornaliero (immutable per un anno alla CDN, invalido per tag).
   // Jitter deterministico anti-herd: stessa key → stesso TTL ovunque (M3
   // garantito perché gli header derivano dallo stesso dynamicPosterTtlSec).
-  const ttl = mappingTag ? undefined : dynamicPosterTtlMs(cacheKey)
+  // opts.ttlMs (es. qualità effimera dopo timeout upstream) vince su tutto,
+  // anche sul path mappato: un render degradato non deve mai restare 24h.
+  const explicitTtlMs = opts?.ttlMs
+  const ttl = explicitTtlMs ?? (mappingTag ? undefined : dynamicPosterTtlMs(cacheKey))
+  // ttlSec/immutable nel record header: le HIT riusano gli stessi valori dello
+  // storage (M3) invece di sovrastimare max-age/immutable con i default di
+  // richiesta su entry effimere. Record vecchi senza campi → fallback invariato.
+  const ttlSec = explicitTtlMs !== undefined
+    ? Math.max(1, Math.round(explicitTtlMs / 1000))
+    : (mappingTag ? undefined : dynamicPosterTtlSec(cacheKey))
+  const record: PosterHeadersRecord = { etag: payload.etag, ttlSec, immutable: opts?.immutable }
   cacheSet(cacheKey, payload.buffer, tags, ttl)
-  cacheSet(`${cacheKey}:headers`, { etag: payload.etag }, tags, ttl)
+  cacheSet(`${cacheKey}:headers`, record, tags, ttl)
 }
 
 // ---------------------------------------------------------------------------

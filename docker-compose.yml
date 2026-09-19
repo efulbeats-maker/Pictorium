@@ -29,6 +29,20 @@ services:
       - PICTORIUM_CUSTOM_RATING_API_KEY=${PICTORIUM_CUSTOM_RATING_API_KEY:-${POSTERIUM_CUSTOM_RATING_API_KEY:-}}
       - PICTORIUM_CUSTOM_RATING_API_KEY_HEADER=${PICTORIUM_CUSTOM_RATING_API_KEY_HEADER:-${POSTERIUM_CUSTOM_RATING_API_KEY_HEADER:-}}
       - PICTORIUM_CUSTOM_RATINGS=${PICTORIUM_CUSTOM_RATINGS:-${POSTERIUM_CUSTOM_RATINGS:-}}
+      # ── Opzionali — Multi-utente (istanza pubblica per-UUID) ──
+      # PICTORIUM_MULTI_USER=1 abilita mapping/default/chiavi per UUID
+      # (POST /api/users, gestione su /u/<uuid>/configure). Default off =
+      # single-user invariato. PROFILE_ENCRYPTION_KEY obbligatoria con flag
+      # ON (fail-closed sul salvataggio chiavi); retention cleanup inattivi
+      # (0 = mai). Quota poster per UUID via MAX_MAPPINGS, cap namespace via
+      # MAX_USERS. Con flag ON le richieste scoped (?u=) NON usano le chiavi
+      # d'istanza (mai open-proxy sulla quota operatore) salvo
+      # MULTI_USER_ALLOW_ENV_FALLBACK=1.
+      - PICTORIUM_MULTI_USER=${PICTORIUM_MULTI_USER:-}
+      - PICTORIUM_MAX_MAPPINGS_PER_USER=${PICTORIUM_MAX_MAPPINGS_PER_USER:-}
+      - PICTORIUM_MAX_USERS=${PICTORIUM_MAX_USERS:-}
+      - PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK=${PICTORIUM_MULTI_USER_ALLOW_ENV_FALLBACK:-}
+      - PICTORIUM_USER_RETENTION_DAYS=${PICTORIUM_USER_RETENTION_DAYS:-}
       # ── Opzionali — Admin & Sicurezza ──
       # Senza ADMIN_TOKEN né PICTORIUM_PUBLIC_INSTANCE=1 l'editor resta chiuso
       # (fail-closed); gli endpoint poster/cataloghi restano sempre aperti.

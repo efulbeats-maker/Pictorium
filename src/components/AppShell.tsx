@@ -8,7 +8,10 @@ import { usePosterEditor } from "@/lib/contexts/PosterEditorContext"
 import { LangPicker } from "@/components/LangPicker"
 import { ToastProvider } from "@/components/Toast"
 import { HomeStatusStrip } from "@/components/HomeStatusStrip"
-import { Settings, Sparkles, QrCode, Palette, Layers } from "lucide-react"
+import { currentPathUuid, isUserUnlocked, requestUserUnlock } from "@/lib/user-token"
+import { requestSettingsTab } from "@/lib/settings-tab"
+import { isMultiUserServer } from "@/lib/guest-guard"
+import { Settings, Sparkles, QrCode, Palette, Layers, KeyRound } from "lucide-react"
 
 // Code-splitting: viste/modali pesanti caricate on-demand per ridurre il JS iniziale.
 const SettingsPanel = dynamic(() => import("@/components/SettingsPanel").then((m) => m.SettingsPanel), { ssr: false })
@@ -20,6 +23,7 @@ const ProxyModal = dynamic(() => import("@/components/ProxyModal").then((m) => m
 const InstallModal = dynamic(() => import("@/components/InstallModal").then((m) => m.InstallModal), { ssr: false })
 const OnboardingTour = dynamic(() => import("@/components/OnboardingTour").then((m) => m.OnboardingTour), { ssr: false })
 const PinLockModal = dynamic(() => import("@/components/PinLockModal").then((m) => m.PinLockModal), { ssr: false })
+const UserUnlockModal = dynamic(() => import("@/components/UserUnlockModal").then((m) => m.UserUnlockModal), { ssr: false })
 
 export function AppShell() {
   const setSettingsOpen = usePSelector((v) => v.setSettingsOpen)
@@ -50,6 +54,17 @@ export function AppShell() {
 
   const [hasPinConfigured, setHasPinConfigured] = useState<boolean | null>(null)
   const [isUnlocked, setIsUnlocked] = useState(false)
+  // Su /u/<uuid> il cancello è la password dello spazio (UserUnlockModal):
+  // il lucchetto PIN d'istanza non deve murare anche gli spazi (niente doppio
+  // cancello in multi-user). Letto al mount: AppShell è per-pagina.
+  const [isUserPath] = useState(() => currentPathUuid() !== null)
+
+  useEffect(() => {
+    const id = currentPathUuid()
+    if (id && typeof window !== "undefined") {
+      try { window.sessionStorage?.setItem("pictorium_active_space", id) } catch {}
+    }
+  }, [])
 
   const checkPinStatus = useCallback(() => {
     fetch("/api/auth/pin")
@@ -106,6 +121,44 @@ export function AppShell() {
   const handleInstallCatalog = () => {
     setInstallOpen(true)
   }
+
+  // Scorciatoia UUID (icona chiave): su /u/<uuid> bloccato riapre il modal di
+  // sblocco, altrimenti apre le impostazioni sul tab Spazio e ci scorre.
+  // Niente navigazione: resta dove sei. L'icona si mostra solo quando ha
+  // senso (multi-user ON o path /u/): il single-user resta pixel-identico.
+  const [uuidShortcutVisible, setUuidShortcutVisible] = useState(false)
+  useEffect(() => {
+    if (currentPathUuid()) {
+      setUuidShortcutVisible(true)
+      return
+    }
+    isMultiUserServer().then(
+      (v) => setUuidShortcutVisible(v),
+      () => setUuidShortcutVisible(false),
+    )
+  }, [])
+  const handleUuidShortcut = useCallback(() => {
+    const id = currentPathUuid()
+    if (id && !isUserUnlocked(id)) {
+      requestUserUnlock(id)
+      return
+    }
+    setSettingsOpen(true)
+    // Tab richiesta consumata dal pannello al mount (deterministica) +
+    // evento per il pannello già aperto + scroll alla sezione.
+    requestSettingsTab("spazio")
+    let tries = 0
+    const tick = () => {
+      window.dispatchEvent(new CustomEvent("pictorium:settings-space-tab"))
+      const el = document.getElementById("pictorium-uuid-section")
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+        return
+      }
+      if (++tries < 10) setTimeout(tick, 150)
+    }
+    setTimeout(tick, 50)
+  }, [setSettingsOpen])
 
   return (
     <>
@@ -182,6 +235,19 @@ export function AppShell() {
             <Sparkles className="w-4 h-4" />
           </button>
 
+          {/* Spazio UUID (crea/entri/sblocca) */}
+          {uuidShortcutVisible && (
+            <button
+              type="button"
+              aria-label={t("ui.userSpaceTitle")}
+              title={t("ui.userSpaceTitle")}
+              onClick={handleUuidShortcut}
+              className="p-2 rounded-xl text-zinc-400 hover:text-accent-orange hover:bg-white/[0.08] active:scale-90 transition-all duration-150 cursor-pointer"
+            >
+              <KeyRound className="w-4 h-4" />
+            </button>
+          )}
+
           {/* Settings Button */}
           <button
             type="button"
@@ -235,7 +301,7 @@ export function AppShell() {
           view === "edit" && selected ? "translate-y-full pointer-events-none opacity-0" : "translate-y-0 opacity-100"
         }`}
       >
-        <div className="grid grid-cols-5 items-center justify-around max-w-md mx-auto">
+        <div className={`grid ${uuidShortcutVisible ? "grid-cols-6" : "grid-cols-5"} items-center justify-around max-w-md mx-auto`}>
           {/* Cataloghi */}
           <button
             type="button"
@@ -277,6 +343,22 @@ export function AppShell() {
             </div>
             <span className="text-[10px] font-semibold text-white tracking-tight truncate">{t("ui.install")}</span>
           </button>
+
+          {/* Spazio UUID (crea/entri/sblocca) */}
+          {uuidShortcutVisible && (
+            <button
+              type="button"
+              onClick={handleUuidShortcut}
+              aria-label={t("ui.userSpaceTitle")}
+              title={t("ui.userSpaceTitle")}
+              className="flex flex-col items-center justify-center gap-1 py-1 px-1 rounded-xl transition-all duration-150 active:scale-90 cursor-pointer text-zinc-400 hover:text-zinc-200"
+            >
+              <span className="h-8 flex items-center justify-center">
+                <KeyRound className="w-5 h-5 text-accent-orange" />
+              </span>
+              <span className="text-[10px] tracking-tight truncate">{t("ui.userSpaceTitle")}</span>
+            </button>
+          )}
 
           {/* I Miei Poster */}
           <button
@@ -356,9 +438,11 @@ export function AppShell() {
     </div>
     </ToastProvider>
     {!showLangPicker && <OnboardingTour />}
-    {hasPinConfigured && !isUnlocked && !showLangPicker && (
+    {hasPinConfigured && !isUnlocked && !showLangPicker && !isUserPath && (
       <PinLockModal onSuccess={handlePinUnlock} />
     )}
+    {/* Sblocco proprietario multi-user (solo path /u/<uuid>, vedi componente) */}
+    <UserUnlockModal />
     </>
   )
 }

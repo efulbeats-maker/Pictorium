@@ -92,7 +92,7 @@ describe("resolvePosterRenderConfig", () => {
     const r = resolvePosterRenderConfig(baseInput({
       searchParams: new URLSearchParams({ rs: "pill" }),
       mapping: mapping({ rankingBadgeStyle: "colored" }),
-      configOverride: config({ rankingBadgeStyle: "bar" }),
+      configOverride: config({ rankingBadgeStyle: "bordo" }),
       sd: { rankingBadgeStyle: "netflix" },
     }))
     expect(r.rankingBadgeStyle).toBe("pill")
@@ -102,7 +102,7 @@ describe("resolvePosterRenderConfig", () => {
     const r = resolvePosterRenderConfig(baseInput({
       mapping: mapping({ rankingBadgeStyle: "default" }),
       configOverride: config({ rankingBadgeStyle: "colored" }),
-      sd: { rankingBadgeStyle: "bar" },
+      sd: { rankingBadgeStyle: "pill" },
     }))
     expect(r.rankingBadgeStyle).toBe("colored")
   })

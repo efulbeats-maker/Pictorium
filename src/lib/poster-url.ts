@@ -97,12 +97,25 @@ interface PosterState {
   lang: string
   region?: string
   tmdbKey: string
+  /** Namespace utente (multi-user): emesso come `u=` così la preview rende il mapping del namespace. */
+  userId?: string | null
 }
 
-export function buildUrlPattern(bp: BadgeParams & { tmdbKey: string; lang: string; mdblistApiKey?: string }): string {
+export function buildUrlPattern(bp: BadgeParams & {
+  tmdbKey: string
+  lang: string
+  mdblistApiKey?: string
+  /** Namespace utente (multi-user): emesso come `u=` nel template. */
+  userId?: string | null
+  /** Namespace con chiavi server-side: omette le chiavi dal template (il
+   *  server le risolve da namespace via `u=`) invece di incollarle in chiaro. */
+  omitApiKey?: boolean
+  omitMdblistKey?: boolean
+}): string {
   let url = `${getPosterPublicBaseUrl()}/api/poster/{type}/{imdb_id}`
   const params = buildStremioPosterSearchParams({
     lang: bp.lang,
+    user: bp.userId ?? undefined,
     globalBadges: bp.globalBadges,
     rankingBadges: bp.rankingBadges,
     badgeGenre: bp.badgeGenre,
@@ -140,9 +153,10 @@ export function buildUrlPattern(bp: BadgeParams & { tmdbKey: string; lang: strin
   // Template che l'utente copia per sé (come la manifest URL con chiavi):
   // qui le chiavi sono volute — Stremio non invia header custom, quindi il
   // server le legge dalla query al momento del render. Mai nei poster URL
-  // serviti (vedi stremio-poster-params.ts).
-  if (bp.tmdbKey) params.set("api_key", bp.tmdbKey)
-  if (bp.mdblistApiKey) params.set("mdblist_key", bp.mdblistApiKey)
+  // serviti (vedi stremio-poster-params.ts). Con namespace multi-user che ha
+  // chiavi server-side, `u=` basta e le chiavi restano fuori dal DB di terzi.
+  if (!bp.omitApiKey && bp.tmdbKey) params.set("api_key", bp.tmdbKey)
+  if (!bp.omitMdblistKey && bp.mdblistApiKey) params.set("mdblist_key", bp.mdblistApiKey)
   const str = params.toString()
   if (str) url += "?" + str
   return url
@@ -151,6 +165,9 @@ export function buildUrlPattern(bp: BadgeParams & { tmdbKey: string; lang: strin
 export function buildPreviewUrl(ps: PosterState, bp: BadgeParams): string {
   if (!ps.selected) return ""
   const params: string[] = [`rv=${RENDER_VERSION}`]
+  // Namespace utente: la preview WYSIWYG deve leggere il mapping del
+  // namespace, altrimenti mostra il poster globale (desync).
+  if (ps.userId) params.push(`u=${ps.userId}`)
   if (ps.tmdbKey) params.push(`api_key=${encodeURIComponent(ps.tmdbKey)}`)
   params.push(`badges=${bp.globalBadges ? "1" : "0"}`)
   params.push(`ranking=${bp.rankingBadges ? "1" : "0"}`)

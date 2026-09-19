@@ -4,8 +4,23 @@ import type { Mapping } from "@/lib/types"
 import { DATA_DIR } from "@/lib/data-dir"
 import { createLogger } from "@/lib/logger"
 import { envWithFallback } from "@/lib/env-compat"
+import { getMaxMappingsPerUser } from "@/lib/user-auth"
 
 export type { Mapping }
+
+/** Superata la quota mapping del namespace utente → il caller risponde 413. */
+export class QuotaExceededError extends Error {
+  constructor(readonly max: number) {
+    super(`Mapping quota exceeded (max ${max} mappings per user)`)
+    this.name = "QuotaExceededError"
+  }
+}
+
+// userId validati dai caller (sanitizeUserId); qui fail-closed difensivo:
+// un id non-UUID non tocca mai path né chiavi KV.
+function assertValidUserId(userId: string): void {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) throw new Error("Invalid user id")
+}
 
 const log = createLogger("store")
 
@@ -84,6 +99,83 @@ async function kvImportMappings(mappings: Mapping[]) {
   }
   await kv.hset("mappings", entries)
   if (kvCache) Object.assign(kvCache, entries)
+}
+
+// ---- KV per-utente (multi-user) ----
+// Stesso pattern del globale ma su hash `mappings:<uuid>` con cache per-utente
+// (cap LRU: i namespace caldi restano in memoria senza OOM su istanze aperte).
+
+interface KvUserCache {
+  map: Record<string, Mapping> | null
+  at: number
+  inflight: Promise<Record<string, Mapping>> | null
+}
+
+const kvUserCaches = new Map<string, KvUserCache>()
+const KV_USER_CACHE_CAP = 200
+
+function userKvKey(userId: string): string {
+  return `mappings:${userId}`
+}
+
+function kvUserCacheFor(userId: string): KvUserCache {
+  let c = kvUserCaches.get(userId)
+  if (c) {
+    // Promote LRU.
+    kvUserCaches.delete(userId)
+    kvUserCaches.set(userId, c)
+    return c
+  }
+  c = { map: null, at: 0, inflight: null }
+  if (kvUserCaches.size >= KV_USER_CACHE_CAP) {
+    const oldest = kvUserCaches.keys().next().value
+    if (oldest !== undefined) kvUserCaches.delete(oldest)
+  }
+  kvUserCaches.set(userId, c)
+  return c
+}
+
+async function kvReadAllCachedFor(userId: string): Promise<Record<string, Mapping>> {
+  const c = kvUserCacheFor(userId)
+  const now = Date.now()
+  if (c.map && now - c.at < KV_READ_TTL_MS) return c.map
+  if (c.inflight) return c.inflight
+  c.inflight = (async () => {
+    const { kv } = await import("@vercel/kv")
+    const raw = await kv.hgetall<Record<string, Mapping>>(userKvKey(userId))
+    const map = raw ?? {}
+    c.map = map
+    c.at = Date.now()
+    return map
+  })().finally(() => { c.inflight = null })
+  return c.inflight
+}
+
+async function kvUpsertFor(userId: string, mapping: Mapping) {
+  const { kv } = await import("@vercel/kv")
+  const key = `${mapping.mediaType}:${mapping.tmdbId}`
+  const next = { ...mapping, updatedAt: new Date().toISOString() }
+  await kv.hset(userKvKey(userId), { [key]: next })
+  const c = kvUserCaches.get(userId)
+  if (c?.map) c.map[key] = next
+}
+
+async function kvRemoveFor(userId: string, type: "movie" | "tv", id: number) {
+  const { kv } = await import("@vercel/kv")
+  const key = `${type}:${id}`
+  await kv.hdel(userKvKey(userId), key)
+  const c = kvUserCaches.get(userId)
+  if (c?.map) delete c.map[key]
+}
+
+async function kvRemoveAllFor(userId: string) {
+  const { kv } = await import("@vercel/kv")
+  await kv.del(userKvKey(userId))
+  const c = kvUserCaches.get(userId)
+  if (c) {
+    c.map = {}
+    c.at = Date.now()
+  }
 }
 
 // ---- File-based helpers (HF / local) ----
@@ -212,21 +304,190 @@ async function persist(data: Record<string, Mapping>) {
   }
 }
 
+// ---- File-based per-utente (multi-user) ----
+// Mirror in memoria per namespace con cap LRU + TTL: stessi 500ms del globale,
+// evict oltre USER_MIRROR_CAP utenti caldi (bound su istanze aperte).
+
+interface UserMirror {
+  data: Record<string, Mapping> | null
+  time: number
+  lastStat: number
+}
+
+const userMirrors = new Map<string, UserMirror>()
+const USER_MIRROR_CAP = 200
+
+function userFile(userId: string): string {
+  return path.join(DATA_DIR, "users", userId, "mappings.json")
+}
+
+function userMirrorFor(userId: string): UserMirror {
+  let m = userMirrors.get(userId)
+  if (m) {
+    userMirrors.delete(userId)
+    userMirrors.set(userId, m)
+    return m
+  }
+  m = { data: null, time: 0, lastStat: 0 }
+  if (userMirrors.size >= USER_MIRROR_CAP) {
+    const oldest = userMirrors.keys().next().value
+    if (oldest !== undefined) userMirrors.delete(oldest)
+  }
+  userMirrors.set(userId, m)
+  return m
+}
+
+async function loadUserFromDisk(userId: string): Promise<Record<string, Mapping>> {
+  const file = userFile(userId)
+  const mirror = userMirrorFor(userId)
+  try {
+    const stat = await fsp.stat(file).catch(() => null)
+    const raw = await fsp.readFile(file, "utf-8")
+    const data = JSON.parse(raw) as Record<string, Mapping>
+    mirror.data = data
+    mirror.time = stat ? stat.mtimeMs : Date.now()
+    return data
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      mirror.data = {}
+      mirror.time = 0
+      return {}
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    log.warn("Failed to load user mappings", { error: message })
+    return mirror.data ?? {}
+  }
+}
+
+async function readUserFromMem(userId: string): Promise<Record<string, Mapping>> {
+  const mirror = userMirrorFor(userId)
+  const now = Date.now()
+  if (mirror.data && now - mirror.lastStat < READ_STAT_TTL_MS) return mirror.data
+  mirror.lastStat = now
+  try {
+    const stat = await fsp.stat(userFile(userId))
+    if (mirror.data && stat.mtimeMs <= mirror.time) return mirror.data
+  } catch (e) {
+    // File sparito (wipe account): ricarica da disco (resetta il mirror a {}),
+    // mai servire lo snapshot stantio. Altri errori → fallback al mirror.
+    if (isNodeError(e) && e.code === "ENOENT") return loadUserFromDisk(userId)
+    if (mirror.data) return mirror.data
+  }
+  return loadUserFromDisk(userId)
+}
+
+async function persistUser(userId: string, data: Record<string, Mapping>) {
+  const file = userFile(userId)
+  await fsp.mkdir(path.dirname(file), { recursive: true }).catch((e) => {
+    const msg = e instanceof Error ? e.message : String(e)
+    log.error(`Failed to create user data dir '${path.dirname(file)}': ${msg}`)
+    throw new Error(`Cannot create user data directory: ${msg}`)
+  })
+  const tmp = `${file}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
+  try {
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2))
+    try {
+      await fsp.rename(tmp, file)
+    } catch (e) {
+      if (isNodeError(e) && (e as NodeJS.ErrnoException).code === "EXDEV") {
+        await fsp.copyFile(tmp, file)
+        await fsp.unlink(tmp).catch(() => {})
+      } else {
+        throw e
+      }
+    }
+    const mirror = userMirrorFor(userId)
+    mirror.data = data
+    mirror.time = Date.now()
+  } catch (e) {
+    await fsp.unlink(tmp).catch(() => {})
+    const msg = e instanceof Error ? e.message : String(e)
+    log.error("Failed to write user mappings", { error: msg })
+    throw new Error(`Cannot persist user mappings: ${msg}`)
+  }
+}
+
+// Code di scrittura per-utente: la coda globale serializzava tutti i
+// namespace insieme (uno stallo su un utente bloccava gli altri).
+const userWriteQueues = new Map<string, Promise<unknown>>()
+const userWriteFailures = new Map<string, number>()
+
+function enqueueUserWrite<T>(userId: string, task: () => Promise<T>): Promise<T> {
+  const prev = userWriteQueues.get(userId) ?? Promise.resolve()
+  const run = (prev as Promise<unknown>).then(task, task)
+  const tracked = run.then(
+    () => { userWriteFailures.set(userId, 0) },
+    (error) => {
+      const n = (userWriteFailures.get(userId) ?? 0) + 1
+      userWriteFailures.set(userId, n)
+      const msg = error instanceof Error ? error.message : String(error)
+      log.error("User write queue task failed", { error: msg, consecutiveFailures: n })
+      throw error
+    },
+  )
+  userWriteQueues.set(userId, tracked)
+  // L'errore viaggia sul `run` restituito al chiamante: questo catch evita
+  // solo la unhandled-rejection sulla promise archiviata in coda.
+  tracked.catch(() => {})
+  return run
+}
+
+/** Quota per-utente: lancia QuotaExceededError se una chiave NUOVA sfora il cap. */
+function assertUserQuota(data: Record<string, Mapping>, key: string): void {
+  if (key in data) return
+  const max = getMaxMappingsPerUser()
+  if (Object.keys(data).length >= max) throw new QuotaExceededError(max)
+}
+
+/** Evict delle cache in-process del namespace (wipe account). Solo test + user-activity. */
+export function __evictUserStoreCache(userId: string): void {
+  userMirrors.delete(userId)
+  kvUserCaches.delete(userId)
+}
+
 // ---- Exported API ----
 
-export async function getAll(): Promise<Mapping[]> {
+export async function getAll(userId?: string | null): Promise<Mapping[]> {
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) return Object.values(await kvReadAllCachedFor(userId))
+    return Object.values(await readUserFromMem(userId))
+  }
   if (useKv) return Object.values(await kvReadAllCached())
   return Object.values(await readFromMem())
 }
 
-export async function getById(type: "movie" | "tv", id: number): Promise<Mapping | null> {
+export async function getById(type: "movie" | "tv", id: number, userId?: string | null): Promise<Mapping | null> {
+  // Namespace stretto: con userId SOLO il namespace, mai fallback globale.
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) return (await kvReadAllCachedFor(userId))[`${type}:${id}`] ?? null
+    const data = await readUserFromMem(userId)
+    return data[`${type}:${id}`] ?? null
+  }
   if (useKv) return (await kvReadAllCached())[`${type}:${id}`] ?? null
   const key = `${type}:${id}`
   const data = await readFromMem()
   return data[key] ?? null
 }
 
-export async function upsert(mapping: Mapping) {
+export async function upsert(mapping: Mapping, userId?: string | null) {
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) {
+      const current = await kvReadAllCachedFor(userId)
+      assertUserQuota(current, `${mapping.mediaType}:${mapping.tmdbId}`)
+      await kvUpsertFor(userId, mapping)
+      return
+    }
+    return enqueueUserWrite(userId, async () => {
+      const data = await loadUserFromDisk(userId)
+      const key = `${mapping.mediaType}:${mapping.tmdbId}`
+      assertUserQuota(data, key)
+      data[key] = { ...mapping, updatedAt: new Date().toISOString() }
+      await persistUser(userId, data)
+    })
+  }
   if (useKv) {
     await kvUpsert(mapping)
     return
@@ -244,7 +505,20 @@ export async function upsert(mapping: Mapping) {
   })
 }
 
-export async function remove(type: "movie" | "tv", id: number) {
+export async function remove(type: "movie" | "tv", id: number, userId?: string | null) {
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) {
+      await kvRemoveFor(userId, type, id)
+      return
+    }
+    return enqueueUserWrite(userId, async () => {
+      const data = await loadUserFromDisk(userId)
+      const key = `${type}:${id}`
+      delete data[key]
+      await persistUser(userId, data)
+    })
+  }
   if (useKv) {
     await kvRemove(type, id)
     return
@@ -257,7 +531,17 @@ export async function remove(type: "movie" | "tv", id: number) {
   })
 }
 
-export async function removeAll() {
+export async function removeAll(userId?: string | null) {
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) {
+      await kvRemoveAllFor(userId)
+      return
+    }
+    return enqueueUserWrite(userId, async () => {
+      await persistUser(userId, {})
+    })
+  }
   if (useKv) {
     await kvRemoveAll()
     return
@@ -267,7 +551,39 @@ export async function removeAll() {
   })
 }
 
-export async function importMappings(mappings: Mapping[]) {
+export async function importMappings(mappings: Mapping[], userId?: string | null) {
+  if (userId) {
+    assertValidUserId(userId)
+    if (useKv) {
+      const { kv } = await import("@vercel/kv")
+      const current = await kvReadAllCachedFor(userId)
+      const max = getMaxMappingsPerUser()
+      const fresh = mappings.filter((m) => !(`${m.mediaType}:${m.tmdbId}` in current))
+      if (Object.keys(current).length + fresh.length > max) throw new QuotaExceededError(max)
+      const entries: Record<string, Mapping> = {}
+      const now = new Date().toISOString()
+      for (const m of mappings) {
+        entries[`${m.mediaType}:${m.tmdbId}`] = { ...m, updatedAt: now }
+      }
+      await kv.hset(userKvKey(userId), entries)
+      const c = kvUserCaches.get(userId)
+      if (c?.map) Object.assign(c.map, entries)
+      return
+    }
+    return enqueueUserWrite(userId, async () => {
+      const data = await loadUserFromDisk(userId) // Fix M13: merge sullo stato reale su disco
+      const max = getMaxMappingsPerUser()
+      const fresh = mappings.filter((m) => !(`${m.mediaType}:${m.tmdbId}` in data))
+      if (Object.keys(data).length + fresh.length > max) throw new QuotaExceededError(max)
+      const now = new Date().toISOString()
+      for (const m of mappings) {
+        const key = `${m.mediaType}:${m.tmdbId}`
+        // Stesso motivo del ramo KV: updatedAt è parte del cache key dei poster.
+        data[key] = { ...m, updatedAt: now }
+      }
+      await persistUser(userId, data)
+    })
+  }
   if (useKv) {
     await kvImportMappings(mappings)
     return

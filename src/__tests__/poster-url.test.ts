@@ -110,18 +110,36 @@ describe("buildUrlPattern", () => {
   })
 
   it("includes gradientHeight, blur, bf, bd, bs, rs params", () => {
-    const url = buildUrlPattern({ ...baseBadgeParams, tmdbKey: "k", lang: "it", gradientHeight: 50, blurIntensity: 8, blurFade: 70, blurDarkness: 50, badgeStyle: "pill", rankingBadgeStyle: "bar" })
+    const url = buildUrlPattern({ ...baseBadgeParams, tmdbKey: "k", lang: "it", gradientHeight: 50, blurIntensity: 8, blurFade: 70, blurDarkness: 50, badgeStyle: "pill", rankingBadgeStyle: "pill" })
     expect(url).toContain("gradHeight=50")
     expect(url).toContain("blur=8")
     expect(url).toContain("bf=70")
     expect(url).toContain("bd=50")
     expect(url).toContain("bs=pill")
-    expect(url).toContain("rs=bar")
+    expect(url).toContain("rs=pill")
   })
 
   it("encodes lang param", () => {
     const url = buildUrlPattern({ ...baseBadgeParams, tmdbKey: "k", lang: "it" })
     expect(url).toContain("lang=it")
+  })
+
+  it("emits u= for the user namespace without dropping api_key", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111"
+    const url = buildUrlPattern({ ...baseBadgeParams, tmdbKey: "k", lang: "it", userId: uuid })
+    expect(url).toContain(`u=${uuid}`)
+    expect(url).toContain("api_key=k")
+  })
+
+  it("omits api_key/mdblist_key when the namespace holds server-side keys", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111"
+    const url = buildUrlPattern({
+      ...baseBadgeParams, tmdbKey: "k", mdblistApiKey: "m", lang: "it",
+      userId: uuid, omitApiKey: true, omitMdblistKey: true,
+    })
+    expect(url).toContain(`u=${uuid}`)
+    expect(url).not.toContain("api_key=")
+    expect(url).not.toContain("mdblist_key=")
   })
 })
 
@@ -144,6 +162,17 @@ describe("buildPreviewUrl", () => {
   it("includes api_key", () => {
     const url = buildPreviewUrl(basePosterState, baseBadgeParams)
     expect(url).toContain("api_key=test-key")
+  })
+
+  it("includes u= for the user namespace (WYSIWYG nel namespace)", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111"
+    const url = buildPreviewUrl({ ...basePosterState, userId: uuid }, baseBadgeParams)
+    expect(url).toContain(`u=${uuid}`)
+  })
+
+  it("omits u= without a namespace", () => {
+    const url = buildPreviewUrl(basePosterState, baseBadgeParams)
+    expect(url).not.toContain("u=")
   })
 
   it("includes poster param from previewPoster", () => {
@@ -261,13 +290,13 @@ describe("buildPreviewUrl", () => {
   })
 
   it("includes gradHeight, blur, bf, bd, bs, rs", () => {
-    const url = buildPreviewUrl(basePosterState, { ...baseBadgeParams, gradientHeight: 50, blurIntensity: 8, blurFade: 70, blurDarkness: 50, badgeStyle: "pill", rankingBadgeStyle: "bar" })
+    const url = buildPreviewUrl(basePosterState, { ...baseBadgeParams, gradientHeight: 50, blurIntensity: 8, blurFade: 70, blurDarkness: 50, badgeStyle: "pill", rankingBadgeStyle: "pill" })
     expect(url).toContain("gradHeight=50")
     expect(url).toContain("blur=8")
     expect(url).toContain("bf=70")
     expect(url).toContain("bd=50")
     expect(url).toContain("bs=pill")
-    expect(url).toContain("rs=bar")
+    expect(url).toContain("rs=pill")
   })
 
   it("includes be=0 when blurEnabled is false", () => {

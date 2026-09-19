@@ -7,6 +7,7 @@ import { getAll, getStorageMode } from "@/lib/store"
 import { checkTmdbEndpoint, resolveRouteApiKey } from "@/lib/tmdb"
 import { getJWRankings } from "@/lib/justwatch"
 import { getTop10 } from "@/lib/flixpatrol"
+import { extractUserParam, getScopedUserId, userDir } from "@/lib/user-auth"
 
 // Fix L15: i campi streaming devono testare DAVVERO JustWatch e FlixPatrol
 // (prima testavano due endpoint TMDB, fuorviante). I probe girano solo con
@@ -115,12 +116,18 @@ export async function GET(request: Request) {
     ? await probeFlixPatrol()
     : { ok: false, status: 401, time: 0 }
 
-  const mappingsFile = path.join(DATA_DIR, "mappings.json")
-  const defaultsFile = path.join(DATA_DIR, "defaults.json")
+  const rawUser = extractUserParam(request)
+  const scopedUserId = getScopedUserId(rawUser)
 
-  await fsp.mkdir(DATA_DIR, { recursive: true }).catch(() => {})
+  const targetDir = scopedUserId ? userDir(scopedUserId) : DATA_DIR
+  const mappingsFile = path.join(targetDir, "mappings.json")
+  const defaultsFile = path.join(targetDir, "defaults.json")
 
-  const mappings = await getAll().catch(() => [])
+  if (!scopedUserId) {
+    await fsp.mkdir(DATA_DIR, { recursive: true }).catch(() => {})
+  }
+
+  const mappings = await getAll(scopedUserId).catch(() => [])
   const lastMappingUpdatedAt = mappings
     .map((m) => m.updatedAt)
     .filter(Boolean)
@@ -128,19 +135,20 @@ export async function GET(request: Request) {
     .at(-1) ?? null
 
   const storageMode = getStorageMode()
+  const dirToCheck = (await fileExists(targetDir)) ? targetDir : DATA_DIR
 
   const storage = {
     mode: storageMode,
     // dataDir NON esposto: rivelerebbe il path assoluto del filesystem (info leak)
-    dataDirExists: storageMode === "file" ? await fileExists(DATA_DIR) : null,
-    dataDirWritable: storageMode === "file" ? await canWriteDir(DATA_DIR) : null,
+    dataDirExists: storageMode === "file" ? await fileExists(targetDir) : null,
+    dataDirWritable: storageMode === "file" ? await canWriteDir(dirToCheck) : null,
     mappingsFileExists: storageMode === "file" ? await fileExists(mappingsFile) : null,
     dataFileExists: storageMode === "file" ? await fileExists(mappingsFile) : null,
     mappingsReadable: storageMode === "file" ? await canRead(mappingsFile) : null,
-    mappingsWritable: storageMode === "file" ? await canWriteDir(DATA_DIR) : null,
+    mappingsWritable: storageMode === "file" ? await canWriteDir(dirToCheck) : null,
     defaultsFileExists: storageMode === "file" ? await fileExists(defaultsFile) : null,
     defaultsReadable: storageMode === "file" ? await canRead(defaultsFile) : null,
-    defaultsWritable: storageMode === "file" ? await canWriteDir(DATA_DIR) : null,
+    defaultsWritable: storageMode === "file" ? await canWriteDir(dirToCheck) : null,
     mappingCount: mappings.length,
     mappingsCount: mappings.length,
     lastMappingUpdatedAt,

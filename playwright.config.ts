@@ -80,6 +80,7 @@ export default defineConfig({
         POSTERIUM_MULTI_USER: "",
         JUSTWATCH_API_URL: `${mockUrl}/graphql`,
         WIKIDATA_SPARQL_URL: `${mockUrl}/sparql`,
+        WIKIDATA_API_URL: `${mockUrl}/w/api.php`,
         IMDB_CHART_URL: `${mockUrl}/chart/top`,
         MDBLIST_API_URL: `${mockUrl}/mdblist/api`,
         TRAKT_API_URL: `${mockUrl}/trakt`,

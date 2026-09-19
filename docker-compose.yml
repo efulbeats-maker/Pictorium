@@ -58,6 +58,9 @@ services:
       # Cifratura AES-256-GCM delle apiKeys dei profili cloud (openssl rand -hex 32).
       # Senza, le chiavi dei profili restano in chiaro a riposo (warning in prod).
       - PROFILE_ENCRYPTION_KEY=${PROFILE_ENCRYPTION_KEY:-}
+      # Proxy fidato (dietro Cloudflare/Caddy/Nginx) e allowlist host pubblici
+      - PICTORIUM_TRUST_PROXY=${PICTORIUM_TRUST_PROXY:-${POSTERIUM_TRUST_PROXY:-}}
+      - PICTORIUM_ALLOWED_HOSTS=${PICTORIUM_ALLOWED_HOSTS:-${POSTERIUM_ALLOWED_HOSTS:-}}
 
       # ── Opzionali — Persistenza distribuita ──
       - KV_REST_API_URL=${KV_REST_API_URL:-}

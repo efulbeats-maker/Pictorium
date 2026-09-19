@@ -93,6 +93,7 @@ const APP_ENV = {
   }),
   JUSTWATCH_API_URL: `${MOCK_URL}/graphql`,
   WIKIDATA_SPARQL_URL: `${MOCK_URL}/sparql`,
+  WIKIDATA_API_URL: `${MOCK_URL}/w/api.php`,
   IMDB_CHART_URL: `${MOCK_URL}/chart/top`,
   MDBLIST_API_URL: `${MOCK_URL}/mdblist/api`,
   TRAKT_API_URL: `${MOCK_URL}/trakt`,

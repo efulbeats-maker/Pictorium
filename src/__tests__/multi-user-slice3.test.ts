@@ -228,6 +228,8 @@ describe("status aggregates", () => {
     const body = await res.json()
     expect(body.multiUser).toBe(true)
     expect(body.users).toBe(1)
+    expect(typeof body.maxUsers).toBe("number")
+    expect(body.maxUsers).toBeGreaterThanOrEqual(0)
     expect(typeof body.usersBytes).toBe("number")
     expect(body.keysEncryption).toBe(true)
     expect(body.keyMissing).toMatchObject({ catalogs: expect.any(Number), keyMissing: expect.any(Number) })

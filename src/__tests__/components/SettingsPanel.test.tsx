@@ -221,4 +221,33 @@ describe("SettingsPanel", () => {
     expect(screen.getAllByRole("tab")).toHaveLength(4)
     resetGuestGuardForTests()
   })
+
+  it("allows selecting TVDB as episode metadata source in prefs tab", async () => {
+    renderWithCtx(
+      <SettingsPanel
+        setSettingsOpen={() => {}}
+        exportData={() => {}}
+        importData={() => {}}
+      />
+    )
+    const prefsTab = screen.getByRole("tab", { name: "ui.settingsTabPrefs" })
+    fireEvent.click(prefsTab)
+
+    const tvdbBtn = screen.getByRole("button", { name: "TVDB" })
+    const tmdbBtn = screen.getByRole("button", { name: "TMDB" })
+
+    // TMDB default: highlighted with bg-white/20
+    expect(tmdbBtn.className).toContain("bg-white/20")
+    expect(tvdbBtn.className).not.toContain("bg-white/20")
+
+    // Click TVDB
+    fireEvent.click(tvdbBtn)
+    expect(tvdbBtn.className).toContain("bg-white/20")
+    expect(tmdbBtn.className).not.toContain("bg-white/20")
+
+    // Click TMDB back
+    fireEvent.click(tmdbBtn)
+    expect(tmdbBtn.className).toContain("bg-white/20")
+    expect(tvdbBtn.className).not.toContain("bg-white/20")
+  })
 })

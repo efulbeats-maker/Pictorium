@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { Check, Copy, KeyRound, X } from "lucide-react"
+import { Check, Copy, KeyRound } from "lucide-react"
 import { useT } from "@/lib/contexts/TranslationContext"
 import {
   currentPathUuid,
@@ -23,8 +23,9 @@ import {
  *
  * - Recovery `#key=<secret>`: usato in memoria e rimosso dall'URL (mai in
  *   HTTP/log, mai salvato), sblocca subito senza modal (gesto esplicito).
- * - Senza nulla (ospite): modal chiudibile SOLO con la X esplicita (mai per
- *   click fuori), sola lettura. A modal chiuso resta una pill "Accedi".
+ * - Senza nulla: hard gate senza dismiss (come il lucchetto PIN globale):
+ *   il modal resta finché non si sblocca. Niente X, niente click fuori,
+ *   niente pill ospite — chiudere il gate non è mai un'opzione.
  * - Riapertura su richiesta (icona UUID): evento USER_UNLOCK_REQUEST_EVENT.
  * - Allo sblocco emette USER_UNLOCK_EVENT (hook/editor ricaricano il namespace).
  */
@@ -32,10 +33,7 @@ export function UserUnlockModal() {
   const { t } = useT()
   const [uuid, setUuid] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
-  // Pill "Accedi" nascosta per sessione (ospite intenzionale): mai nagging,
-  // ma il rientro resta a un tap finché non si ricarica.
-  const [pillDismissed, setPillDismissed] = useState(false)
-  // Re-render allo sblocco così la pill sparisce senza refresh.
+  // Re-render allo sblocco così il gate si chiude senza refresh.
   const [, setUnlockTick] = useState(0)
   const [mode, setMode] = useState<"password" | "secret">("password")
   const [input, setInput] = useState("")
@@ -61,7 +59,6 @@ export function UserUnlockModal() {
       if (!id) return
       setUuid(id)
       if (isUserUnlocked(id)) return
-      setPillDismissed(false)
       setOpen(true)
     }
     window.addEventListener(USER_UNLOCK_REQUEST_EVENT, onRequest)
@@ -77,8 +74,7 @@ export function UserUnlockModal() {
   }, [])
 
   // Guardia mount-once: l'effect dipende da `t` (cambia identità al cambio
-  // lingua) ma l'auto-apertura vale solo al primo giro — senza, il modal
-  // riappariva da solo a chi l'aveva chiuso apposta.
+  // lingua) ma l'auto-apertura vale solo al primo giro.
   const didInit = useRef(false)
   useEffect(() => {
     if (didInit.current) return
@@ -179,40 +175,11 @@ export function UserUnlockModal() {
 
   if (!uuid) return null
 
-  // Modal chiuso ma spazio ancora bloccato: pill persistente di rientro (il
-  // dismiss con la X non è più un vicolo cieco). Nascosta per sessione alla X
-  // (ospite intenzionale) e sparisce da sola allo sblocco (unlock tick).
-  if (!open && !isUserUnlocked(uuid) && !pillDismissed) {
-    return (
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40">
-        <div className="flex items-center gap-2 pl-3 pr-1.5 py-1.5 rounded-full border border-white/10 bg-surface shadow-2xl">
-          <KeyRound className="w-3.5 h-3.5 text-accent-orange shrink-0" />
-          <span className="text-[11px] text-zinc-300 whitespace-nowrap">{t("ui.userUnlockTitle")}</span>
-          <button
-            type="button"
-            onClick={() => setOpen(true)}
-            className="px-3 py-1.5 rounded-full text-[11px] font-semibold bg-amber-500 text-black hover:bg-amber-400 transition-colors cursor-pointer"
-          >
-            {t("ui.userUnlockOpen")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPillDismissed(true)}
-            aria-label={t("ui.close")}
-            className="w-7 h-7 flex items-center justify-center rounded-full text-zinc-500 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
-    )
-  }
-
   if (!open) return null
 
   return (
-    // Niente dismiss da backdrop: il click fuori chiudeva per sbaglio (dita
-    // mobili) e senza rientro l'unica via era il refresh. Solo la X esplicita.
+    // Hard gate: niente dismiss da backdrop (click fuori) e niente X — come
+    // il lucchetto PIN globale, il modal resta finché non si sblocca.
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div
         className="w-full max-w-sm rounded-2xl border border-white/10 bg-surface shadow-2xl p-5 space-y-3"
@@ -220,19 +187,11 @@ export function UserUnlockModal() {
         aria-modal="true"
         aria-label={t("ui.userUnlockTitle")}
       >
-        <div className="flex items-center justify-between">
+        <div className="flex items-center">
           <h3 className="text-sm font-bold text-zinc-100 flex items-center gap-1.5">
             <KeyRound className="w-4 h-4 text-accent-orange" />
             {t("ui.userUnlockTitle")}
           </h3>
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            aria-label={t("ui.close")}
-            className="w-8 h-8 flex items-center justify-center rounded-lg bg-surface2 hover:bg-zinc-700 text-muted hover:text-zinc-200 transition-all"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
         <p className="text-xs text-muted leading-relaxed">{t("ui.userUnlockDesc")}</p>
         <div>

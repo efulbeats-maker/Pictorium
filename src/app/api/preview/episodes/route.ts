@@ -8,7 +8,7 @@ import {
   getTVSeason,
   type TMDBEpisodeGroupDetails,
   posterUrl,
-  resolveRequestApiKey,
+  resolveRouteApiKey,
 } from "@/lib/tmdb"
 import { enrichVideosWithTvdb } from "@/lib/tvdb"
 import { buildVideosFromAnizip, buildVideosFromGroups, buildVideosFromTvdb, concurrentMap, resolveSeasonNumbers, seasonNumberForGroup } from "@/lib/episode-ordering"
@@ -44,9 +44,9 @@ export async function GET(req: NextRequest) {
   // normalize: empty string -> null (standard)
   const episodeGroupId = rawGroupId && rawGroupId !== "" ? rawGroupId : null
   const language = req.nextUrl.searchParams.get("lang") || "it-IT"
-  const apiKey = resolveRequestApiKey(req)
+  const apiKey = (await resolveRouteApiKey(req)) || ""
   const tvdbKeyParam = req.nextUrl.searchParams.get("tvdb_key") || undefined
-  const tvdbApiKey = tvdbKeyParam || envWithFallback("TVDB_API_KEY") || process.env.TVDB_API_KEY
+  const tvdbApiKey = tvdbKeyParam || (await resolveRouteApiKey(req, "tvdb")) || envWithFallback("TVDB_API_KEY") || process.env.TVDB_API_KEY || ""
   const episodeMetadataSource = req.nextUrl.searchParams.get("source") || (tvdbApiKey ? "tvdb" : "tmdb")
 
   // "auto" (parametro assente) e "standard" esplicito hanno chiavi diverse:

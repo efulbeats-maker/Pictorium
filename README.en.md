@@ -31,6 +31,10 @@ pinned: false
   <a href="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml"><img src="https://github.com/Eful97/Pictorium/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
 </p>
 
+> [!TIP]
+> 🚀 **Try the [public instance](https://pictorium.duckdns.org)** (currently on trial): create your space with your free TMDB key.
+> ☕ [Donations](https://ko-fi.com/eful97) go toward keeping the VPS running for everyone.
+
 ---
 
 ## 📸 Preview

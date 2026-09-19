@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
-import { isMultiUserEnabled } from "@/lib/user-auth"
+import { isMultiUserEnabled, getMaxUsers } from "@/lib/user-auth"
 import { listUsers } from "@/lib/user-activity"
 import { getKeyMissingStats } from "@/lib/catalog-handler"
 import { isUserKeysEncryptionAvailable } from "@/lib/user-keys"
 
 /**
  * Stato multi-user (aggregati soli, nessun UUID/segreto): numero utenti,
- * byte occupati, cifratura chiavi disponibile, contatori key-missing dei
+ * cap spazi (0 = illimitati), byte occupati, cifratura chiavi disponibile, contatori key-missing dei
  * cataloghi. Pubblico come /api/health (solo conteggi operativi).
  */
 export async function GET(req: NextRequest) {
@@ -22,6 +22,7 @@ export async function GET(req: NextRequest) {
   return Response.json({
     multiUser,
     users: users.length,
+    maxUsers: multiUser ? getMaxUsers() : 0,
     usersBytes,
     keysEncryption: isUserKeysEncryptionAvailable(),
     keyMissing: getKeyMissingStats(),

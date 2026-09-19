@@ -555,6 +555,9 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   let tmdbNetworksDetailed: { name: string; logoPath: string | null }[] = []
   let productionCompaniesDetailed: { name: string; logoPath: string | null }[] = []
   let imdbId: string | null = pathImdbId
+  // QID Wikidata per il fast-path REST (zero RTT: già in external_ids via
+  // append). Solo ramo non-mappato; mapping/query restano SPARQL-fallback.
+  let wikidataId: string | null = null
 
   const queryPoster = req.nextUrl.searchParams.get("poster")
   const queryLogo = req.nextUrl.searchParams.get("logo")
@@ -658,7 +661,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       const sessionData = getTMDBSessionCache(mediaType, tmdbId)
       let details: Awaited<ReturnType<typeof getDetails>>
       let images: Awaited<ReturnType<typeof getImages>>
-      let extIds: { imdb_id: string | null; tvdb_id?: number | null }
+      let extIds: { imdb_id: string | null; tvdb_id?: number | null; wikidata_id?: string | null }
       if (sessionData?.details && sessionData.images) {
         details = sessionData.details
         images = sessionData.images
@@ -675,6 +678,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
         extIds = {
           imdb_id: det.external_ids?.imdb_id ?? null,
           tvdb_id: det.external_ids?.tvdb_id ?? null,
+          wikidata_id: det.external_ids?.wikidata_id ?? null,
         }
         const origLang = det.original_language
         const needsOrigLang = origLang && origLang !== preferredLanguage && origLang !== "en"
@@ -688,6 +692,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
       // poi il primo backdrops di /images (già 16:9 nativi).
       autoBackdropPath = details.backdrop_path || images.backdrops[0]?.file_path || null
       imdbId = extIds.imdb_id
+      wikidataId = extIds.wikidata_id ?? null
       // A1: fetch deferito — la media TMDB+IMDb parte subito ma non blocca.
       ratingAbort = imdbId ? new AbortController() : null
       aggregatedRating = imdbId
@@ -1120,7 +1125,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
           })
           const result = await Promise.race([
             rankingEnabledEarly
-              ? fetchAllWikidata(tmdbId, mediaType, combineAbortSignals(renderAbort.signal, wdAbort.signal)).catch(() => emptyWikidata)
+              ? fetchAllWikidata(tmdbId, mediaType, combineAbortSignals(renderAbort.signal, wdAbort.signal), { wikidataId }).catch(() => emptyWikidata)
               : Promise.resolve(emptyWikidata),
             wikidataTimeout,
           ])

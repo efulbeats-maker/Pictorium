@@ -121,6 +121,8 @@ const itDict: Record<string, string> = {
   "ui.setupPinSkip": "Salta questo passaggio",
   "ui.setupPinMinDigits": "Il PIN deve contenere almeno 6 cifre",
   "ui.setupPinStremioNotice": "Manifest e poster Stremio restano aperti",
+  "ui.spacesUsedOf": "{used}/{max} spazi",
+  "ui.spacesUsed": "{used} spazi",
 }
 
 function mockT(key: string, params?: Record<string, string | number>): string {

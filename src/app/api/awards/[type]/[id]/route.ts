@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server"
-import { fetchAllWikidata, directorBadgeLabel } from "@/lib/awards"
+import { fetchAllWikidata, directorBadgeLabel, isValidWikidataQid } from "@/lib/awards"
 import { createT } from "@/lib/i18n"
 import { getKeywords, resolveRouteApiKey } from "@/lib/tmdb"
 import { rateLimit, rateLimitKey, rateLimitResponse } from "@/lib/rate-limit"
@@ -22,8 +22,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<RouteP
   // Fix L10: try/catch — prima un throw di fetchAllWikidata/getKeywords
   // (outage upstream) cascava in un 500 generico.
   try {
+    // Fast-path REST solo se il chiamante porta già il QID (mai fetch TMDB
+    // extra qui: endpoint leggero, SPARQL resta il default).
+    const qidParam = req.nextUrl.searchParams.get("wikidata_id")
+    const wikidataId = isValidWikidataQid(qidParam) ? qidParam : undefined
     const [data, keywords] = await Promise.all([
-      fetchAllWikidata(tmdbId, mediaType),
+      fetchAllWikidata(tmdbId, mediaType, undefined, wikidataId ? { wikidataId } : undefined),
       getKeywords(mediaType, tmdbId, apiKey),
     ])
     // Il director in cache è canonico (chiave senza lingua): reso qui nella

@@ -289,8 +289,15 @@ export default function EditView() {
     const candidates = [selectedImdbId, String(selectedId)].filter(Boolean) as string[]
     const fetchTvdbId = async (cid: string) => {
       try {
-        const res = await userFetch(`/api/tvdb/${encodeURIComponent(cid)}/seasonTypes?tvdb_key=${encodeURIComponent(tvdbApiKey)}&tmdb_key=${encodeURIComponent(tmdbKey || "")}`, {
-          headers: { "x-api-key": tvdbApiKey, "x-tmdb-key": tmdbKey || "" },
+        const sp = new URLSearchParams()
+        if (tvdbApiKey) sp.set("tvdb_key", tvdbApiKey)
+        if (tmdbKey) sp.set("tmdb_key", tmdbKey)
+        const query = sp.toString() ? `?${sp.toString()}` : ""
+        const headers: Record<string, string> = {}
+        if (tvdbApiKey) headers["x-api-key"] = tvdbApiKey
+        if (tmdbKey) headers["x-tmdb-key"] = tmdbKey
+        const res = await userFetch(`/api/tvdb/${encodeURIComponent(cid)}/seasonTypes${query}`, {
+          headers: Object.keys(headers).length > 0 ? headers : undefined,
         })
         const d = await res.json().catch(() => ({}))
         if (d?.tvdbId && Number.isFinite(d.tvdbId)) return d.tvdbId as number

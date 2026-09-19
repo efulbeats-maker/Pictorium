@@ -229,6 +229,16 @@ function qidFromEntityUri(value: string | null | undefined): string | null {
   return m ? m[1] : null
 }
 
+// Base Action API sovrascrivibile via env: nei test E2E punta al mock server
+// locale (stesso pattern di WIKIDATA_SPARQL_URL per lo SPARQL).
+const wikidataApiBase = () =>
+  process.env.WIKIDATA_API_URL || "https://www.wikidata.org/w/api.php"
+
+/** QID valido per il fast-path REST (es. "Q25191"). */
+export function isValidWikidataQid(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^Q\d+$/.test(value)
+}
+
 /**
  * Titolo del sitelink enwiki di un item (es. Q25191 → "Christopher Nolan").
  * Fallback fail-open per item senza label: 1 chiamata API veloce con timeout
@@ -236,7 +246,7 @@ function qidFromEntityUri(value: string | null | undefined): string | null {
  */
 async function enwikiTitle(qid: string, signal?: AbortSignal): Promise<string | null> {
   try {
-    const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=sitelinks&sitefilter=enwiki&format=json`
+    const url = `${wikidataApiBase()}?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=sitelinks&sitefilter=enwiki&format=json`
     const res = await timedFetch(url, {
       headers: { "User-Agent": "Pictorium/1.0" },
       signal: combineAbortSignals(signal, 4000),
@@ -305,12 +315,125 @@ export function __resetWikidataNegativeForTest(): void {
   wikidataNegative.clear()
 }
 
+// ---- Circuit breaker isolato per il fast-path REST (Action API) ----
+// Stesse soglie dello SPARQL ma finestre indipendenti: un outage SPARQL non
+// deve chiudere il REST (CDN diversa) e viceversa.
+const wikidataRestBreaker = createCircuitBreaker({ name: "awards-rest", failureThreshold: 5, backoffMs: 60_000 })
+
+/** Solo per i test: azzera il breaker REST. */
+export function __resetWikidataRestBreakerForTest(): void {
+  wikidataRestBreaker.reset()
+}
+
+interface WikidataClaims {
+  awardQids: string[]
+  nominationQids: string[]
+  directorQids: string[]
+  networkQids: string[]
+}
+
+function claimQids(claims: Record<string, unknown> | undefined, prop: string): string[] {
+  if (!claims || !Array.isArray((claims as Record<string, unknown>)[prop])) return []
+  const out: string[] = []
+  for (const item of (claims as Record<string, unknown[]>)[prop]) {
+    const qid = qidFromEntityUri(
+      (item as { mainsnak?: { datavalue?: { value?: { id?: string } } } })?.mainsnak?.datavalue?.value?.id,
+    )
+    if (qid) out.push(qid)
+  }
+  return out
+}
+
+/**
+ * Fast-path REST via Wikidata Action API (CDN Fastly, sub-secondo) usando il
+ * wikidata_id nativo di TMDB. Due RTT sequenziali dentro il budget della race
+ * (claims ~1000ms + labels batch ~800ms < 2500ms):
+ *  1. claims P166 (premi) / P1411 (nomination) / P57 (regista) / P449 (network, solo tv);
+ *  2. un'unica labels batch en (cap 50 QID).
+ * Ritorna null su qualsiasi fallimento (fallback SPARQL a valle).
+ */
+export async function fetchWikidataRest(
+  qid: string,
+  mediaType: "movie" | "tv",
+  signal?: AbortSignal,
+): Promise<WikidataResult | null> {
+  if (!isValidWikidataQid(qid)) return null
+  if (wikidataRestBreaker.isOpen()) return null
+  if (signal?.aborted) return null
+  try {
+    const claimsUrl = `${wikidataApiBase()}?action=wbgetentities&ids=${encodeURIComponent(qid)}&props=claims&format=json`
+    const claimsRes = await timedFetch(claimsUrl, {
+      headers: { "User-Agent": "Pictorium/1.0" },
+      signal: combineAbortSignals(signal, 1000),
+    })
+    if (!claimsRes.ok) {
+      wikidataRestBreaker.recordFailure()
+      return null
+    }
+    const claimsJson = await claimsRes.json()
+    const claims = claimsJson?.entities?.[qid]?.claims as Record<string, unknown> | undefined
+    if (!claims) {
+      wikidataRestBreaker.recordFailure()
+      return null
+    }
+    const parsed: WikidataClaims = {
+      awardQids: claimQids(claims, "P166"),
+      nominationQids: claimQids(claims, "P1411"),
+      directorQids: claimQids(claims, "P57"),
+      // P449 (network) ha senso solo per le serie: lo SPARQL lo chiede solo lì.
+      networkQids: mediaType === "tv" ? claimQids(claims, "P449") : [],
+    }
+    const allQids = [...new Set([...parsed.awardQids, ...parsed.nominationQids, ...parsed.directorQids, ...parsed.networkQids])].slice(0, 50)
+    const labels = new Map<string, string>()
+    if (allQids.length > 0) {
+      const labelsUrl = `${wikidataApiBase()}?action=wbgetentities&ids=${encodeURIComponent(allQids.join("|"))}&props=labels&languages=en&format=json`
+      const labelsRes = await timedFetch(labelsUrl, {
+        headers: { "User-Agent": "Pictorium/1.0" },
+        signal: combineAbortSignals(signal, 800),
+      })
+      if (!labelsRes.ok) {
+        wikidataRestBreaker.recordFailure()
+        return null
+      }
+      const labelsJson = await labelsRes.json()
+      const entities = labelsJson?.entities as Record<string, { labels?: Record<string, { value?: string }> }> | undefined
+      if (entities) {
+        for (const [id, ent] of Object.entries(entities)) {
+          const label = ent?.labels?.en?.value
+          if (typeof label === "string" && label.length > 0) labels.set(id, label)
+        }
+      }
+    }
+    const labelOf = (ids: string[]): string[] =>
+      ids.map((id) => labels.get(id)).filter((l): l is string => !!l)
+
+    // Regista: label batch, poi sitelink enwiki come ultima spiaggia (stesso
+    // pattern del ramo SPARQL per item senza label).
+    let director: string | null = labelOf(parsed.directorQids)[0] || null
+    if (!director && parsed.directorQids[0]) {
+      director = await enwikiTitle(parsed.directorQids[0], signal).catch(() => null)
+    }
+
+    wikidataRestBreaker.recordSuccess()
+    return {
+      awards: matchRules(labelOf(parsed.awardQids)),
+      nominations: matchRules(labelOf(parsed.nominationQids)),
+      studios: matchStudios(labelOf(parsed.networkQids)),
+      director: matchDirectorName(director),
+    }
+  } catch {
+    wikidataRestBreaker.recordFailure()
+    return null
+  }
+}
+
 export async function fetchAllWikidata(
   tmdbId: number,
   mediaType: "movie" | "tv",
   // R3: signal esterno (es. deadline render) — senza, il fetch sopravvive al
   // watchdog come zombie anche dopo il 503.
   signal?: AbortSignal,
+  opts?: { wikidataId?: string | null },
 ): Promise<WikidataResult> {
   const cacheKey = `wikidata:v2:${mediaType}:${tmdbId}`
 
@@ -321,6 +444,18 @@ export async function fetchAllWikidata(
   if (cached) return cached
   if (wikidataNegativeHit(cacheKey)) {
     return { awards: [], nominations: [], studios: [], director: null }
+  }
+
+  // Fast-path REST a costo zero RTT TMDB (QID già in mano dalla route via
+  // append_to_response=external_ids). Successo → stessa cache condivisa 24h
+  // dello SPARQL; fallimento → fallback SPARQL sotto (QID null o assente
+  // compreso: TMDB lo restituisce null per una fetta reale di titoli).
+  if (isValidWikidataQid(opts?.wikidataId)) {
+    const rest = await fetchWikidataRest(opts.wikidataId, mediaType, signal).catch(() => null)
+    if (rest) {
+      cacheSet(cacheKey, rest, ["wikidata"], WIKIDATA_CACHE_TTL)
+      return rest
+    }
   }
 
   const tmdbProp = mediaType === "movie" ? "P4947" : "P4983"

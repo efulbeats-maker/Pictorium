@@ -9,11 +9,27 @@ import { currentPathUuid } from "@/lib/user-token"
 export function HomeStatusStrip() {
   const { t } = useT()
   const [statusHref, setStatusHref] = useState("/status")
+  // Occupazione spazi (solo multi-user): resta nascosto finché il dato non
+  // arriva o se l'endpoint fallisce — nessun layout shift, nessun errore.
+  const [spaces, setSpaces] = useState<{ users: number; maxUsers: number } | null>(null)
 
   useEffect(() => {
     const uuid = currentPathUuid()
     if (uuid) {
       setStatusHref(`/status?u=${encodeURIComponent(uuid)}`)
+    }
+    let cancelled = false
+    fetch("/api/status")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return
+        if (d?.multiUser === true && typeof d.users === "number") {
+          setSpaces({ users: d.users, maxUsers: typeof d.maxUsers === "number" ? d.maxUsers : 0 })
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
     }
   }, [])
 
@@ -28,6 +44,13 @@ export function HomeStatusStrip() {
         <Link href={statusHref} className="status-link" suppressHydrationWarning>
           {t("ui.statusTitle")}
         </Link>
+        {spaces !== null && (
+          <span data-testid="home-spaces">
+            {spaces.maxUsers > 0
+              ? t("ui.spacesUsedOf", { used: spaces.users, max: spaces.maxUsers })
+              : t("ui.spacesUsed", { used: spaces.users })}
+          </span>
+        )}
         <span className="hidden sm:inline" aria-hidden="true">Pictorium v{APP_VERSION}</span>
       </div>
     </footer>

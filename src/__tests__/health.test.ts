@@ -113,4 +113,48 @@ describe("GET /api/health", () => {
     expect(json.tmdb.apiKey).toBe(true)
     expect(json.status).toBe("healthy")
   })
+
+  it("reports user namespace storage and mapping count when ?u= is provided", async () => {
+    const crypto = await import("node:crypto")
+    tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), "pictorium-health-ns-storage-"))
+    process.env.PICTORIUM_DATA_DIR = tempDir
+    process.env.PICTORIUM_MULTI_USER = "1"
+    process.env.PROFILE_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex")
+    vi.resetModules()
+
+    const { createUser } = await import("@/lib/user-auth")
+    const store = await import("@/lib/store")
+    const user = await createUser("password123")
+
+    await store.upsert({
+      tmdbId: 101, mediaType: "movie", title: "User Movie", posterPath: "/m.jpg",
+      logoPath: null, originalPosterPath: null,
+      language: "it", updatedAt: "2026-07-01T00:00:00.000Z",
+    }, user.uuid)
+
+    await store.upsert({
+      tmdbId: 102, mediaType: "tv", title: "User Series", posterPath: "/s.jpg",
+      logoPath: null, originalPosterPath: null,
+      language: "en", updatedAt: "2026-07-02T00:00:00.000Z",
+    }, user.uuid)
+
+    const { GET } = await import("@/app/api/health/route")
+
+    // Senza ?u=: storage globale vuoto
+    const globalReq = new Request("http://localhost:3000/api/health")
+    const globalRes = await GET(globalReq)
+    const globalJson = await globalRes.json()
+    expect(globalJson.storage.mappingCount).toBe(0)
+    expect(globalJson.storage.dataFileExists).toBe(false)
+
+    // Con ?u=: spazio utente isolato
+    const userReq = new Request(`http://localhost:3000/api/health?u=${user.uuid}`)
+    const userRes = await GET(userReq)
+    const userJson = await userRes.json()
+    expect(userJson.storage.mappingCount).toBe(2)
+    expect(userJson.storage.mappingsCount).toBe(2)
+    expect(userJson.storage.dataFileExists).toBe(true)
+    expect(userJson.storage.mappingsFileExists).toBe(true)
+    expect(userJson.storage.lastMappingUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+  })
 })

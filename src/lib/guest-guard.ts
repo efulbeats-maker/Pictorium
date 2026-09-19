@@ -71,7 +71,7 @@ export function fetchAdminState(): Promise<AdminState> {
 export async function shouldSkipServerSync(): Promise<boolean> {
   const uuid = currentPathUuid()
   if (uuid) {
-    // Pre-unlock (modal chiusa con la X, refresh in attesa di sblocco): niente
+    // Pre-unlock (hard gate ancora aperto, in attesa di sblocco): niente
     // sync e niente validazioni di rete — locale soltanto, senza toast 401.
     // Lo sblocco (password, secret, recovery) emette USER_UNLOCK_EVENT e i
     // caller ritentano da lì.

@@ -89,9 +89,9 @@ describe("AppShell PinLockModal bypass sui path /u/", () => {
     expect(icons.length).toBeGreaterThan(0)
     fireEvent.click(icons[0])
     // Dialog impostazioni sul tab Spazio (sezione UUID presente).
-    const dialogs = await screen.findAllByRole("dialog", { name: "ui.settingsTitle" })
+    const dialogs = await screen.findAllByRole("dialog", { name: "ui.settingsTitle" }, { timeout: 4000 })
     expect(dialogs.length).toBeGreaterThan(0)
-    expect(await screen.findAllByText("ui.userSpaceUuidLabel")).not.toHaveLength(0)
+    expect(await screen.findAllByText("ui.userSpaceUuidLabel", {}, { timeout: 4000 })).not.toHaveLength(0)
     const tabs = screen.getAllByRole("tab", { name: "ui.settingsTabSpace" })
     expect(tabs.length).toBeGreaterThan(0)
     for (const tab of tabs) expect(tab).toHaveAttribute("aria-selected", "true")

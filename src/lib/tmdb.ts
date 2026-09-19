@@ -73,6 +73,7 @@ const tmdbExternalIdsSchema = z.object({
   id: z.number().int().positive(),
   imdb_id: z.string().nullable().optional(),
   tvdb_id: z.number().nullable().optional(),
+  wikidata_id: z.string().nullable().optional(),
 }).passthrough()
 
 const tmdbKeywordItemSchema = z.object({
@@ -628,6 +629,7 @@ export interface TMDBReleaseDatesResponse {
 export interface TMDBExternalIds {
   imdb_id: string | null
   tvdb_id?: number | null
+  wikidata_id?: string | null
 }
 
 export async function getExternalIds(mediaType: "movie" | "tv", id: number, apiKey?: string, signal?: AbortSignal, timeoutMs = 30000): Promise<TMDBExternalIds> {
@@ -696,8 +698,10 @@ export interface TMDBDetails {
   external_ids?: {
     imdb_id?: string | null
     // Stesso shape di tmdbExternalIdsSchema: lo schema details è passthrough,
-    // quindi tvdb_id arriva già a runtime — qui solo il tipo lo ammette.
+    // quindi tvdb_id/wikidata_id arrivano già a runtime — qui solo il tipo
+    // li ammette.
     tvdb_id?: number | null
+    wikidata_id?: string | null
   }
 }
 

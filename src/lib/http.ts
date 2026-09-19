@@ -13,7 +13,7 @@ export class ApiError extends Error {
 // upstream (tmdb/mdblist/awards/trending/flixpatrol/tvdb) sono incluse: senza
 // `?u=` il server non può risolvere le chiavi salvate nel profilo (chiave
 // salvata ma poster vuoti su profilo fresco).
-const SCOPED_PREFIXES = ["/api/mappings", "/api/defaults", "/api/users/", "/api/tmdb", "/api/mdblist", "/api/awards", "/api/trending", "/api/flixpatrol", "/api/tvdb"]
+const SCOPED_PREFIXES = ["/api/mappings", "/api/defaults", "/api/users/", "/api/tmdb", "/api/mdblist", "/api/awards", "/api/trending", "/api/flixpatrol", "/api/tvdb", "/api/preview"]
 
 function isScopedPath(path: string): boolean {
   if (!path.startsWith("/api/")) return false

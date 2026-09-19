@@ -84,38 +84,33 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("UserUnlockModal dismiss e rientro", () => {
+describe("UserUnlockModal hard gate (niente bypass)", () => {
   it("si apre al mount su /u/<uuid>", () => {
     renderModal()
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
-  it("il click sul backdrop NON chiude (solo la X esplicita)", () => {
+  it("il click sul backdrop NON chiude (hard gate)", () => {
     renderModal()
     const dialog = screen.getByRole("dialog")
-    // Il backdrop è il parent diretto del dialog: prima chiudeva qui.
+    // Il backdrop è il parent diretto del dialog: mai dismiss da fuori.
     fireEvent.click(dialog.parentElement!)
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
-  it("la X chiude e mostra la pill Accedi; la pill riapre il modal", () => {
+  it("niente X e niente pill: il gate resta finché non si sblocca", () => {
     renderModal()
-    fireEvent.click(screen.getByLabelText("a:ui.close"))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-    // Pill persistente di rientro: mai un vicolo cieco.
-    fireEvent.click(screen.getByRole("button", { name: "a:ui.userUnlockOpen" }))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
+    // Nessun pulsante di chiusura e nessuna pill "Accedi" da ospite.
+    expect(screen.queryByLabelText("a:ui.close")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "a:ui.userUnlockOpen" })).not.toBeInTheDocument()
   })
 
-  it("il cambio lingua (t nuova) non riapre il modal chiuso apposta", () => {
+  it("il cambio lingua (t nuova) non smonta il gate", () => {
     renderModal()
-    fireEvent.click(screen.getByLabelText("a:ui.close"))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-    // Nuova identità di `t`: l'effect rigira ma la guardia mount-once blocca.
+    // Nuova identità di `t`: l'effect rigira ma la guardia mount-once tiene.
     fireEvent.click(screen.getByTestId("swap-t"))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
-    // E la pill è ancora lì (testi ri-prefissati, prova del re-render).
-    expect(screen.getByRole("button", { name: "b:ui.userUnlockOpen" })).toBeInTheDocument()
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
   })
 
   it("già sbloccato in sessione: non si auto-apre (niente doppio prompt dal gate)", () => {
@@ -125,10 +120,8 @@ describe("UserUnlockModal dismiss e rientro", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
-  it("requestUserUnlock riapre anche dopo pill nascosta", () => {
+  it("requestUserUnlock a gate aperto lo lascia aperto", () => {
     renderModal()
-    fireEvent.click(screen.getByLabelText("a:ui.close"))
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     act(() => requestUserUnlock(UUID))
     expect(screen.getByRole("dialog")).toBeInTheDocument()
   })

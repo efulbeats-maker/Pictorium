@@ -29,6 +29,8 @@ export function MyPostersView() {
   const removeMapping = usePSelector((v) => v.removeMapping)
   const loadMappings = usePSelector((v) => v.loadMappings)
   const tvdbApiKey = usePSelector((v) => v.tvdbApiKey)
+  const serverKeyStatus = usePSelector((v) => v.serverKeyStatus)
+  const hasTvdbKey = !!tvdbApiKey || !!serverKeyStatus?.tvdb
   const lang = usePSelector((v) => v.lang)
   const { t } = useT()
   const [filter, setFilter] = useState("")
@@ -185,7 +187,7 @@ export function MyPostersView() {
       import("sonner").then(({ toast }) => toast.error(t("ui.bulkNeedTv")))
       return
     }
-    if (groupId === "tvdb" && !tvdbApiKey) {
+    if (groupId === "tvdb" && !hasTvdbKey) {
       import("sonner").then(({ toast }) => toast.error(t("ui.epKeyMissingToast")))
       return
     }
@@ -569,10 +571,10 @@ export function MyPostersView() {
               </button>
               <button
                 type="button"
-                disabled={bulkSaving || !tvdbApiKey}
+                disabled={bulkSaving || !hasTvdbKey}
                 onClick={() => bulkSetOrdering("tvdb")}
-                className={`text-xs px-2.5 py-1 rounded-lg border disabled:opacity-50 ${!tvdbApiKey ? "bg-surface2/20 text-zinc-500 border-white/5 cursor-not-allowed" : "bg-surface2/60 text-zinc-200 hover:bg-surface2 border-white/10"}`}
-                title={tvdbApiKey ? t("ui.setTvdb") : t("ui.tvdbKeyNeeded")}
+                className={`text-xs px-2.5 py-1 rounded-lg border disabled:opacity-50 ${!hasTvdbKey ? "bg-surface2/20 text-zinc-500 border-white/5 cursor-not-allowed" : "bg-surface2/60 text-zinc-200 hover:bg-surface2 border-white/10"}`}
+                title={hasTvdbKey ? t("ui.setTvdb") : t("ui.tvdbKeyNeeded")}
               >
                 TVDB
               </button>

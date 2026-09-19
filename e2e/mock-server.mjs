@@ -52,7 +52,7 @@ function detailFor(type) {
   const base = {
     credits: { cast: [{ id: 1, name: "Actor One" }], crew: [{ id: 2, name: "Director One", job: "Director" }] },
     videos: { results: [{ id: "v1", key: "abc123", site: "YouTube", type: "Trailer", name: "Trailer" }] },
-    external_ids: { imdb_id: "tt1234567" },
+    external_ids: { imdb_id: "tt1234567", wikidata_id: "Q12345" },
   }
   if (type === "tv") {
     return {
@@ -216,7 +216,7 @@ const server = http.createServer(async (req, res) => {
     const extIdsMatch = pathname.match(/^\/3\/(movie|tv)\/(\d+)\/external_ids$/)
     if (extIdsMatch) {
       // imdb_id volutamente NON in IMDb Top 250, per poster deterministici
-      return json(res, 200, { id: Number(extIdsMatch[2]), imdb_id: "tt1234567" })
+      return json(res, 200, { id: Number(extIdsMatch[2]), imdb_id: "tt1234567", wikidata_id: "Q12345" })
     }
     const kwMatch = pathname.match(/^\/3\/(movie|tv)\/(\d+)\/keywords$/)
     if (kwMatch) {
@@ -370,6 +370,36 @@ const server = http.createServer(async (req, res) => {
     // Wikidata SPARQL: bindings vuoti → nessun award
     if (pathname === "/sparql") {
       return json(res, 200, { head: { vars: [] }, results: { bindings: [] } })
+    }
+
+    // Wikidata Action API (fast-path REST): payload deterministico per Q12345.
+    // claims → QID finti; labels → label inglesi che matchano le RULES
+    // (Academy Award → Oscar) così il fast-path produce badge in E2E.
+    if (pathname === "/w/api.php") {
+      const ids = (url.searchParams.get("ids") || "").split("|").filter(Boolean)
+      const props = url.searchParams.get("props") || ""
+      if (props.includes("claims")) {
+        const qid = ids[0] || "Q12345"
+        return json(res, 200, {
+          entities: {
+            [qid]: {
+              claims: {
+                P166: [{ mainsnak: { datavalue: { value: { id: "Q109487" } } } }],
+                P1411: [{ mainsnak: { datavalue: { value: { id: "Q109488" } } } }],
+                P57: [{ mainsnak: { datavalue: { value: { id: "Q25191" } } } }],
+              },
+            },
+          },
+        })
+      }
+      const entities = {}
+      for (const id of ids) {
+        // Label distinte per ramo: wins → Oscar, nominations → BAFTA,
+        // regista → allowlist DIRECTORS. Così i test distinguono i rami.
+        const label = id === "Q25191" ? "Christopher Nolan" : id === "Q109488" ? "British Academy Film Award" : "Academy Award"
+        entities[id] = { labels: { en: { value: label } } }
+      }
+      return json(res, 200, { entities })
     }
 
     // IMDb chart minimale: nessun tt-id → fallback al dataset statico
